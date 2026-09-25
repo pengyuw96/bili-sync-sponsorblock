@@ -726,6 +726,25 @@ export interface SponsorBlockConfig {
 	min_keep_gap_seconds: number;
 	api_timeout_ms: number;
 	fail_open: boolean;
+	last_ok?: boolean;
+	checked_at?: string;
+	heartbeat_interval_secs?: number;
+}
+
+export interface SponsorBlockServerHealth {
+	url: string;
+	ok: boolean;
+	latency_ms: number;
+	status_code?: number;
+	error?: string;
+	uptime?: number;
+	hostname?: string;
+}
+
+export interface SponsorBlockHealthResponse {
+	servers: SponsorBlockServerHealth[];
+	last_ok: boolean;
+	checked_at: string;
 }
 
 // 更新配置请求类型

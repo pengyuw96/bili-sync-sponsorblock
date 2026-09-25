@@ -482,6 +482,11 @@
 	let sponsorBlockMirrorsText = 'https://www.bsbsb.xyz';
 	let sponsorBlockShowAdvanced = false;
 	let sponsorBlockSaving = false;
+	let sponsorBlockHealthChecking = false;
+	let sponsorBlockLastOk: boolean | null = null;
+	let sponsorBlockCheckedAt: string | null = null;
+	let sponsorBlockHealthLatencyMs: number | null = null;
+	let sponsorBlockHealthDetail = '';
 
 	function toggleSponsorBlockCategory(category: string, checked: boolean) {
 		if (checked) {
@@ -894,6 +899,9 @@
 		sponsorBlockFailOpen = config.sponsor_block?.fail_open ?? true;
 		sponsorBlockServerAddress = config.sponsor_block?.server_address || 'https://www.bsbsb.top';
 		sponsorBlockMirrorsText = (config.sponsor_block?.mirror_server_addresses || []).join(', ');
+		sponsorBlockLastOk =
+			typeof config.sponsor_block?.last_ok === 'boolean' ? config.sponsor_block.last_ok : null;
+		sponsorBlockCheckedAt = config.sponsor_block?.checked_at || null;
 	}
 
 	function scheduleFilenamePreview() {
@@ -1769,6 +1777,38 @@
 			openSheet = null; // 关闭抽屉
 		} else {
 			toast.error('保存失败', { description: response.data.message });
+		}
+	}
+
+	// 检测 SponsorBlock 服务器心跳
+	async function checkSponsorBlockHealth() {
+		sponsorBlockHealthChecking = true;
+		sponsorBlockHealthDetail = '';
+		try {
+			const response = await runRequest(() => api.getSponsorBlockHealth(), {
+				setLoading: () => {},
+				context: '检测 SponsorBlock 服务器失败'
+			});
+			if (!response) return;
+			const data = response.data;
+			sponsorBlockLastOk = data.last_ok;
+			sponsorBlockCheckedAt = data.checked_at;
+			const primary = data.servers?.[0];
+			sponsorBlockHealthLatencyMs = primary?.latency_ms ?? null;
+			const parts = (data.servers || []).map((s) => {
+				const host = s.hostname || s.url;
+				return s.ok
+					? `${host} OK ${s.latency_ms}ms`
+					: `${host} FAIL ${s.error || s.status_code || ''}`;
+			});
+			sponsorBlockHealthDetail = parts.join('；');
+			if (data.last_ok) {
+				toast.success('SponsorBlock 服务器可达');
+			} else {
+				toast.error('SponsorBlock 服务器检测失败');
+			}
+		} finally {
+			sponsorBlockHealthChecking = false;
 		}
 	}
 
@@ -5497,6 +5537,44 @@
 				<p class="text-muted-foreground text-xs">
 					API 或 ffmpeg 失败时只打警告并保留未裁剪文件（推荐开启）。
 				</p>
+
+				<div
+					class="flex flex-col gap-2 rounded-lg border border-border p-3 sm:flex-row sm:items-center sm:justify-between"
+				>
+					<div class="text-sm">
+						<p class="font-medium">服务器心跳</p>
+						{#if sponsorBlockCheckedAt}
+							<p class="text-muted-foreground text-xs">
+								上次检测：
+								{#if sponsorBlockLastOk === true}
+									<span class="text-green-600 dark:text-green-400">正常</span>
+								{:else if sponsorBlockLastOk === false}
+									<span class="text-red-600 dark:text-red-400">失败</span>
+								{:else}
+									未知
+								{/if}
+								{#if sponsorBlockHealthLatencyMs != null}
+									· {sponsorBlockHealthLatencyMs}ms
+								{/if}
+								· {sponsorBlockCheckedAt}
+							</p>
+							{#if sponsorBlockHealthDetail}
+								<p class="text-muted-foreground mt-1 text-xs">{sponsorBlockHealthDetail}</p>
+							{/if}
+						{:else}
+							<p class="text-muted-foreground text-xs">尚未检测；可点击右侧按钮探测主站与镜像。</p>
+						{/if}
+					</div>
+					<Button
+						type="button"
+						variant="outline"
+						size="sm"
+						disabled={sponsorBlockHealthChecking}
+						onclick={() => checkSponsorBlockHealth()}
+					>
+						{sponsorBlockHealthChecking ? '检测中...' : '检测'}
+					</Button>
+				</div>
 
 				<details
 					bind:open={sponsorBlockShowAdvanced}

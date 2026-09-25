@@ -9,6 +9,7 @@
 
 mod client;
 mod ffmpeg_cut;
+pub mod health;
 mod model;
 pub mod timeline;
 

@@ -32,11 +32,22 @@ Set config key `sponsor_block` (JSON object), for example:
   "min_segment_seconds": 0.5,
   "min_keep_gap_seconds": 0.3,
   "api_timeout_ms": 10000,
-  "fail_open": true
+  "fail_open": true,
+  "heartbeat_interval_secs": 300
 }
 ```
 
 Default: `enabled: false`.
+
+## Heartbeat
+
+Probes `GET {server}/api/status` (primary + mirrors). Does **not** block downloads.
+
+- On startup when enabled: one log heartbeat
+- Periodic every `heartbeat_interval_secs` (default 300; `0` disables periodic)
+- API: authenticated `GET /api/sponsorblock/health`
+- Web settings: status line + 「检测」button
+
 
 ## Attribution
 

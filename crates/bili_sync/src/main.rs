@@ -196,6 +196,12 @@ async fn async_main() -> Result<()> {
         &tracker,
         token.clone(),
     );
+    spawn_task(
+        "SponsorBlock 心跳",
+        sponsorblock::health::run_heartbeat_loop(),
+        &tracker,
+        token.clone(),
+    );
 
     tracker.close();
     handle_shutdown(tracker, token).await;
