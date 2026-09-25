@@ -96,6 +96,8 @@ pub(crate) fn describe_config_key(key: &str) -> &'static str {
         "submission_default_path" => "投稿默认路径模板（旧版）",
         "version" => "旧版配置版本号",
         "risk_control" => "风控验证配置",
+        "sponsor_block" => "BilibiliSponsorBlock 赞助/垫片片段裁剪",
+        "split_chapters_after_download" => "下载后按播放器章节切分",
         "ai_rename" => "AI重命名配置",
         _ => "未知/未定义",
     }

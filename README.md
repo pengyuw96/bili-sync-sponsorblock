@@ -156,3 +156,14 @@ cd bili-sync-up
 - [bilibili-API-collect](https://github.com/SocialSisterYi/bilibili-API-collect) - B站接口文档
 - [bilibili-api](https://github.com/Nemo2011/bilibili-api) - Python 接口实现参考
 - [danmu2ass](https://github.com/gwy15/danmu2ass) - 弹幕下载功能
+
+## Local extension note (audit package)
+
+This tree may include a **local** BilibiliSponsorBlock-style sponsor cutting feature (`sponsor_block` config).
+It is **not** an upstream release claim. See `NOTES.md` / the audit package docs.
+
+Attribution:
+- Base: https://github.com/NeeYoonc/bili-sync-up (v3.1.0)
+- Segment API / semantics: https://github.com/hanydd/BilibiliSponsorBlock
+- API wiki: https://github.com/hanydd/BilibiliSponsorBlock/wiki/API
+
