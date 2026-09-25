@@ -7324,6 +7324,7 @@ async fn download_page(
         fanart_path,
         token.clone(),
     ));
+    let skip_sponsor_cut_for_chapters = video_source.split_chapters_after_download();
     let res_2_fut = Box::pin(fetch_page_video(
         separate_status[1],
         bili_client,
@@ -7336,6 +7337,7 @@ async fn download_page(
         audio_only,
         video_source.download_charge_videos(),
         filter_option,
+        skip_sponsor_cut_for_chapters,
         token.clone(),
     ));
     let res_3_fut = Box::pin(generate_page_nfo(
@@ -9158,6 +9160,7 @@ async fn fetch_page_video(
     audio_only: bool,
     download_charge_videos: bool,
     filter_option: &FilterOption,
+    skip_sponsor_cut_for_chapters: bool,
     token: CancellationToken,
 ) -> Result<PageVideoFetchResult> {
     if !should_run {
@@ -9307,7 +9310,43 @@ async fn fetch_page_video(
         .await;
 
         match download_result {
-            Ok(result) => return Ok(result),
+            Ok(mut result) => {
+                // BilibiliSponsorBlock-style cut (Bilibili path only; after merge).
+                // Fail-open; mutual exclusion with chapter split via skip_sponsor_cut_for_chapters.
+                if matches!(result.status, ExecutionStatus::Succeeded) && page_path.exists() {
+                    let sb_config = crate::config::reload_config().sponsor_block.clone();
+                    if sb_config.enabled {
+                        match crate::sponsorblock::maybe_cut_sponsor_segments(
+                            page_path,
+                            &video_model.bvid,
+                            page_info_for_download.cid,
+                            page_info_for_download.duration,
+                            &sb_config,
+                            skip_sponsor_cut_for_chapters,
+                        )
+                        .await
+                        {
+                            Ok(outcome) => {
+                                debug!("SponsorBlock outcome for {} cid={}: {:?}", video_model.bvid, page_info_for_download.cid, outcome);
+                                if let crate::sponsorblock::SponsorCutOutcome::Cut { .. } = outcome {
+                                    if let Ok(meta) = tokio::fs::metadata(page_path).await {
+                                        result.file_size_bytes = Some(to_db_file_size(meta.len()));
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                // fail_open=false path: do not fail the whole download slot hard unless configured;
+                                // still surface as warn and keep file (defensive).
+                                warn!(
+                                    "SponsorBlock cut error (keeping download success): {} cid={}: {:#}",
+                                    video_model.bvid, page_info_for_download.cid, e
+                                );
+                            }
+                        }
+                    }
+                }
+                return Ok(result);
+            }
             Err(e)
                 if !retried_after_playurl_refresh
                     && crate::downloader::should_refresh_playurl_after_download_error(&e) =>
@@ -15756,6 +15795,7 @@ mod tests {
             false,
             false,
             &FilterOption::default(),
+            false,
             CancellationToken::new(),
         )
         .await

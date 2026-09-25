@@ -25,6 +25,7 @@ mod tiktok;
 mod tiktok_impersonate;
 mod tiktok_sign;
 mod unified_downloader;
+mod sponsorblock;
 mod utils;
 mod workflow;
 mod workflow_danmaku;
