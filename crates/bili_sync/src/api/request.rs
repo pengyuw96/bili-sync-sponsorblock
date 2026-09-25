@@ -353,6 +353,13 @@ pub struct UpdateConfigRequest {
     pub ai_rename_enable_collection: Option<bool>,
     pub ai_rename_enable_bangumi: Option<bool>,
     pub ai_rename_rename_parent_dir: Option<bool>,
+    // SponsorBlock 裁剪配置
+    pub sponsor_block_enabled: Option<bool>,
+    pub sponsor_block_server_address: Option<String>,
+    pub sponsor_block_mirror_server_addresses: Option<Vec<String>>,
+    pub sponsor_block_categories: Option<Vec<String>>,
+    pub sponsor_block_keep_original: Option<bool>,
+    pub sponsor_block_fail_open: Option<bool>,
     // 服务器绑定地址
     pub bind_address: Option<String>,
 }

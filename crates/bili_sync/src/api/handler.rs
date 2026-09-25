@@ -11090,6 +11090,20 @@ pub async fn get_config() -> Result<ApiResponse<crate::api::response::ConfigResp
             audio_prompt_hint: config.ai_rename.audio_prompt_hint.clone(),
             rename_parent_dir: config.ai_rename.rename_parent_dir,
         },
+        // SponsorBlock 裁剪配置
+        sponsor_block: crate::api::response::SponsorBlockConfigResponse {
+            enabled: config.sponsor_block.enabled,
+            server_address: config.sponsor_block.server_address.clone(),
+            mirror_server_addresses: config.sponsor_block.mirror_server_addresses.clone(),
+            categories: config.sponsor_block.categories.clone(),
+            action_types: config.sponsor_block.action_types.clone(),
+            keep_original: config.sponsor_block.keep_original,
+            original_suffix: config.sponsor_block.original_suffix.clone(),
+            min_segment_seconds: config.sponsor_block.min_segment_seconds,
+            min_keep_gap_seconds: config.sponsor_block.min_keep_gap_seconds,
+            api_timeout_ms: config.sponsor_block.api_timeout_ms,
+            fail_open: config.sponsor_block.fail_open,
+        },
         // 服务器绑定地址
         bind_address: config.bind_address.clone(),
     }))
@@ -11762,6 +11776,7 @@ fn config_update_field_display_name(field: &str) -> String {
         "risk_control.auto_solve.max_retries" => Some("自动打码最大重试"),
         "risk_control.auto_solve.solve_timeout" => Some("自动打码单次超时"),
         "ai_rename" => Some("AI重命名配置"),
+        "sponsor_block" => Some("SponsorBlock裁剪配置"),
         _ => None,
     };
 
@@ -13074,6 +13089,65 @@ pub async fn update_config_internal(
         }
     }
 
+    // 处理 SponsorBlock 裁剪配置更新
+    let default_sponsor_block = crate::config::SponsorBlockConfig::default();
+    if let Some(enabled) = params.sponsor_block_enabled {
+        if config.sponsor_block.enabled != enabled {
+            config.sponsor_block.enabled = enabled;
+            updated_fields.push("sponsor_block");
+        }
+    }
+    if let Some(server_address) = &params.sponsor_block_server_address {
+        let normalized = if server_address.trim().is_empty() {
+            default_sponsor_block.server_address.clone()
+        } else {
+            server_address.trim().trim_end_matches('/').to_string()
+        };
+        if config.sponsor_block.server_address != normalized {
+            config.sponsor_block.server_address = normalized;
+            updated_fields.push("sponsor_block");
+        }
+    }
+    if let Some(mirrors) = &params.sponsor_block_mirror_server_addresses {
+        let normalized: Vec<String> = mirrors
+            .iter()
+            .map(|s| s.trim().trim_end_matches('/').to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if config.sponsor_block.mirror_server_addresses != normalized {
+            config.sponsor_block.mirror_server_addresses = normalized;
+            updated_fields.push("sponsor_block");
+        }
+    }
+    if let Some(categories) = &params.sponsor_block_categories {
+        let normalized: Vec<String> = categories
+            .iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        let final_categories = if normalized.is_empty() {
+            default_sponsor_block.categories.clone()
+        } else {
+            normalized
+        };
+        if config.sponsor_block.categories != final_categories {
+            config.sponsor_block.categories = final_categories;
+            updated_fields.push("sponsor_block");
+        }
+    }
+    if let Some(keep_original) = params.sponsor_block_keep_original {
+        if config.sponsor_block.keep_original != keep_original {
+            config.sponsor_block.keep_original = keep_original;
+            updated_fields.push("sponsor_block");
+        }
+    }
+    if let Some(fail_open) = params.sponsor_block_fail_open {
+        if config.sponsor_block.fail_open != fail_open {
+            config.sponsor_block.fail_open = fail_open;
+            updated_fields.push("sponsor_block");
+        }
+    }
+
     if updated_fields.is_empty() {
         return Ok(crate::api::response::UpdateConfigResponse {
             success: false,
@@ -13496,6 +13570,12 @@ pub async fn update_config_internal(
                 | "ai_rename.audio_prompt_hint" => {
                     manager
                         .update_config_item("ai_rename", serde_json::to_value(&config.ai_rename)?)
+                        .await
+                }
+                // SponsorBlock 裁剪配置
+                "sponsor_block" => {
+                    manager
+                        .update_config_item("sponsor_block", serde_json::to_value(&config.sponsor_block)?)
                         .await
                 }
                 _ => {

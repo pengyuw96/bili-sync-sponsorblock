@@ -618,6 +618,8 @@ pub struct ConfigResponse {
     pub risk_control: RiskControlConfigResponse,
     // AI重命名配置
     pub ai_rename: AiRenameConfigResponse,
+    // SponsorBlock 裁剪配置（本地扩展）
+    pub sponsor_block: SponsorBlockConfigResponse,
     // 服务器绑定地址
     pub bind_address: String,
 }
@@ -1200,6 +1202,22 @@ pub struct AiRenameConfigResponse {
     pub video_prompt_hint: String,
     pub audio_prompt_hint: String,
     pub rename_parent_dir: bool,
+}
+
+// SponsorBlock 裁剪配置响应（本地审计扩展）
+#[derive(Serialize, ToSchema)]
+pub struct SponsorBlockConfigResponse {
+    pub enabled: bool,
+    pub server_address: String,
+    pub mirror_server_addresses: Vec<String>,
+    pub categories: Vec<String>,
+    pub action_types: Vec<String>,
+    pub keep_original: bool,
+    pub original_suffix: String,
+    pub min_segment_seconds: f64,
+    pub min_keep_gap_seconds: f64,
+    pub api_timeout_ms: u64,
+    pub fail_open: bool,
 }
 
 // 测试风控验证响应

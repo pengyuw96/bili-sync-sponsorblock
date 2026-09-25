@@ -660,6 +660,8 @@ export interface ConfigResponse {
 	};
 	// AI重命名配置
 	ai_rename?: AiRenameConfig;
+	// SponsorBlock 裁剪配置
+	sponsor_block?: SponsorBlockConfig;
 	// 服务器绑定地址
 	bind_address: string;
 }
@@ -709,6 +711,21 @@ export interface AiRenameConfig {
 	video_prompt_hint: string;
 	audio_prompt_hint: string;
 	rename_parent_dir: boolean;
+}
+
+// SponsorBlock 裁剪配置类型
+export interface SponsorBlockConfig {
+	enabled: boolean;
+	server_address: string;
+	mirror_server_addresses: string[];
+	categories: string[];
+	action_types: string[];
+	keep_original: boolean;
+	original_suffix: string;
+	min_segment_seconds: number;
+	min_keep_gap_seconds: number;
+	api_timeout_ms: number;
+	fail_open: boolean;
 }
 
 // 更新配置请求类型
@@ -842,6 +859,13 @@ export interface UpdateConfigRequest {
 	ai_rename_video_prompt_hint?: string;
 	ai_rename_audio_prompt_hint?: string;
 	ai_rename_rename_parent_dir?: boolean;
+	// SponsorBlock 裁剪配置
+	sponsor_block_enabled?: boolean;
+	sponsor_block_server_address?: string;
+	sponsor_block_mirror_server_addresses?: string[];
+	sponsor_block_categories?: string[];
+	sponsor_block_keep_original?: boolean;
+	sponsor_block_fail_open?: boolean;
 	// 服务器绑定地址
 	bind_address?: string;
 }

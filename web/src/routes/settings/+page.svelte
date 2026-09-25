@@ -33,6 +33,7 @@
 		PaletteIcon,
 		BellIcon,
 		SparklesIcon,
+		ScissorsIcon,
 		RefreshCwIcon,
 	DatabaseIcon,
 		EyeIcon,
@@ -152,6 +153,12 @@
 			icon: BellIcon
 		},
 		{
+			id: 'sponsor_block',
+			title: 'SponsorBlock 裁剪',
+			description: '下载后裁剪赞助/垫片片段',
+			icon: ScissorsIcon
+		},
+		{
 			id: 'ai_rename',
 			title: 'AI重命名',
 			description: '使用AI自动重命名下载的视频文件',
@@ -187,6 +194,8 @@
 		interface: '调整主题模式和前端界面显示偏好。',
 		notification: '配置扫描完成后的推送渠道、测试发送和通知内容。',
 		ai_rename: '配置 AI 自动重命名的启用范围、提示词和相关行为。',
+		sponsor_block:
+			'下载合并后按 BilibiliSponsorBlock 片段用 ffmpeg 裁掉赞助段；与「下载后按章节切分」互斥；弹幕字幕可能不同步。',
 		system: '调整扫描间隔、监听端口、路径模板和基础系统行为。',
 		database: '查看数据库文件信息与各表数据量；可清理图片代理缓存、AI 对话历史、任务队列历史与孤立记录，执行 VACUUM 压缩或备份数据库。'
 	} as const;
@@ -451,6 +460,38 @@
 	let aiRenameRenameParentDir = false;
 	let aiRenameSaving = false;
 	let aiRenameClearingCache = false;
+
+	// SponsorBlock 裁剪配置
+	const SPONSOR_BLOCK_CATEGORY_OPTIONS = [
+		{ value: 'sponsor', label: '赞助广告 (sponsor)' },
+		{ value: 'padding', label: '无意义垫片 (padding)' },
+		{ value: 'selfpromo', label: '自我推广 (selfpromo)' },
+		{ value: 'intro', label: '片头 (intro)' },
+		{ value: 'outro', label: '片尾 (outro)' },
+		{ value: 'interaction', label: '互动提醒 (interaction)' },
+		{ value: 'preview', label: '预告/回顾 (preview)' },
+		{ value: 'filler', label: '过场填充 (filler)' },
+		{ value: 'music_offtopic', label: '非音乐段落 (music_offtopic)' },
+		{ value: 'poi_highlight', label: '高光标记 (poi_highlight)' }
+	] as const;
+	let sponsorBlockEnabled = false;
+	let sponsorBlockCategories: string[] = ['sponsor', 'padding'];
+	let sponsorBlockKeepOriginal = false;
+	let sponsorBlockFailOpen = true;
+	let sponsorBlockServerAddress = 'https://www.bsbsb.top';
+	let sponsorBlockMirrorsText = 'https://www.bsbsb.xyz';
+	let sponsorBlockShowAdvanced = false;
+	let sponsorBlockSaving = false;
+
+	function toggleSponsorBlockCategory(category: string, checked: boolean) {
+		if (checked) {
+			if (!sponsorBlockCategories.includes(category)) {
+				sponsorBlockCategories = [...sponsorBlockCategories, category];
+			}
+		} else {
+			sponsorBlockCategories = sponsorBlockCategories.filter((c) => c !== category);
+		}
+	}
 
 	// 数据库管理
 	let databaseStatus: {
@@ -842,6 +883,17 @@
 		aiRenameVideoPromptHint = config.ai_rename?.video_prompt_hint || '';
 		aiRenameAudioPromptHint = config.ai_rename?.audio_prompt_hint || '';
 		aiRenameRenameParentDir = config.ai_rename?.rename_parent_dir ?? false;
+
+		// SponsorBlock 裁剪配置
+		sponsorBlockEnabled = config.sponsor_block?.enabled ?? false;
+		sponsorBlockCategories =
+			config.sponsor_block?.categories?.length
+				? [...config.sponsor_block.categories]
+				: ['sponsor', 'padding'];
+		sponsorBlockKeepOriginal = config.sponsor_block?.keep_original ?? false;
+		sponsorBlockFailOpen = config.sponsor_block?.fail_open ?? true;
+		sponsorBlockServerAddress = config.sponsor_block?.server_address || 'https://www.bsbsb.top';
+		sponsorBlockMirrorsText = (config.sponsor_block?.mirror_server_addresses || []).join(', ');
 	}
 
 	function scheduleFilenamePreview() {
@@ -1715,6 +1767,38 @@
 			// 重新加载配置以确保同步
 			await loadConfig();
 			openSheet = null; // 关闭抽屉
+		} else {
+			toast.error('保存失败', { description: response.data.message });
+		}
+	}
+
+	// 保存 SponsorBlock 裁剪配置
+	async function saveSponsorBlockConfig() {
+		const mirrors = sponsorBlockMirrorsText
+			.split(/[,\n]/)
+			.map((s) => s.trim())
+			.filter(Boolean);
+		const categories =
+			sponsorBlockCategories.length > 0 ? sponsorBlockCategories : ['sponsor', 'padding'];
+		const config: UpdateConfigRequest = {
+			sponsor_block_enabled: sponsorBlockEnabled,
+			sponsor_block_categories: categories,
+			sponsor_block_keep_original: sponsorBlockKeepOriginal,
+			sponsor_block_fail_open: sponsorBlockFailOpen,
+			sponsor_block_server_address: sponsorBlockServerAddress.trim(),
+			sponsor_block_mirror_server_addresses: mirrors
+		};
+
+		const response = await runRequest(() => api.updateConfig(config), {
+			setLoading: (value) => (sponsorBlockSaving = value),
+			context: '保存 SponsorBlock 配置失败'
+		});
+		if (!response) return;
+
+		if (response.data.success) {
+			toast.success('SponsorBlock 配置保存成功');
+			await loadConfig();
+			openSheet = null;
 		} else {
 			toast.error('保存失败', { description: response.data.message });
 		}
@@ -5295,6 +5379,156 @@
 					{aiRenameSaving ? '保存中...' : '保存设置'}
 				</Button>
 			</div>
+		</SheetFooter>
+	</form>
+</ResponsiveSheet>
+
+<!-- SponsorBlock 裁剪设置抽屉 -->
+<ResponsiveSheet
+	open={openSheet === 'sponsor_block'}
+	onOpenChange={(open) => {
+		if (!open) openSheet = null;
+	}}
+	title="SponsorBlock 裁剪"
+	description="下载合并后按社区标注片段裁剪赞助/垫片"
+	titleTooltip={getSettingTooltip('sponsor_block')}
+	{isMobile}
+>
+	<form
+		onsubmit={(e) => {
+			e.preventDefault();
+			saveSponsorBlockConfig();
+		}}
+		class="flex flex-col {isMobile ? 'h-[calc(90vh-8rem)]' : 'h-[calc(100vh-12rem)]'}"
+	>
+		<div class="min-h-0 flex-1 space-y-6 overflow-y-auto {isMobile ? 'px-4 py-4' : 'px-6 py-6'}">
+			<div
+				class="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/20"
+			>
+				<h4 class="mb-2 font-medium text-amber-800 dark:text-amber-400">功能说明</h4>
+				<p class="text-sm text-amber-700 dark:text-amber-300">
+					下载合并后按 BilibiliSponsorBlock 片段用 ffmpeg 裁掉赞助段；与「下载后按章节切分」互斥；弹幕字幕可能不同步。
+				</p>
+				<p class="mt-2 text-xs text-amber-600 dark:text-amber-400">
+					片段数据来自
+					<a
+						href="https://github.com/hanydd/BilibiliSponsorBlock"
+						target="_blank"
+						rel="noopener noreferrer"
+						class="underline hover:opacity-80">BilibiliSponsorBlock</a
+					>
+					社区标注（非官方），本功能仅消费其公开 API。
+				</p>
+			</div>
+
+			<div class="space-y-4">
+				<div class="flex items-center space-x-2">
+					<input
+						type="checkbox"
+						id="sponsor-block-enabled"
+						bind:checked={sponsorBlockEnabled}
+						class="text-primary focus:ring-primary h-4 w-4 rounded border-gray-300"
+					/>
+					<Label
+						for="sponsor-block-enabled"
+						class="text-sm leading-none font-medium peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+					>
+						启用 SponsorBlock 裁剪
+					</Label>
+				</div>
+				<p class="text-muted-foreground text-sm">
+					开启后，B 站视频合并成功即按类别裁剪；若该源启用了「下载后按章节切分」则会跳过裁剪。
+				</p>
+
+				<div class="space-y-2">
+					<Label>裁剪类别</Label>
+					<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+						{#each SPONSOR_BLOCK_CATEGORY_OPTIONS as opt}
+							<label class="flex items-center space-x-2 text-sm">
+								<input
+									type="checkbox"
+									checked={sponsorBlockCategories.includes(opt.value)}
+									onchange={(e) =>
+										toggleSponsorBlockCategory(
+											opt.value,
+											(e.currentTarget as HTMLInputElement).checked
+										)}
+									class="text-primary focus:ring-primary h-4 w-4 rounded border-gray-300"
+								/>
+								<span>{opt.label}</span>
+							</label>
+						{/each}
+					</div>
+					<p class="text-muted-foreground text-xs">默认仅勾选赞助广告与垫片，建议保持保守。</p>
+				</div>
+
+				<div class="flex items-center space-x-2">
+					<input
+						type="checkbox"
+						id="sponsor-block-keep-original"
+						bind:checked={sponsorBlockKeepOriginal}
+						class="text-primary focus:ring-primary h-4 w-4 rounded border-gray-300"
+					/>
+					<Label
+						for="sponsor-block-keep-original"
+						class="text-sm leading-none font-medium peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+					>
+						保留未裁剪原片
+					</Label>
+				</div>
+				<p class="text-muted-foreground text-xs">
+					开启后会额外保留一份带后缀的原文件（默认后缀 .sponsor-original）。
+				</p>
+
+				<div class="flex items-center space-x-2">
+					<input
+						type="checkbox"
+						id="sponsor-block-fail-open"
+						bind:checked={sponsorBlockFailOpen}
+						class="text-primary focus:ring-primary h-4 w-4 rounded border-gray-300"
+					/>
+					<Label
+						for="sponsor-block-fail-open"
+						class="text-sm leading-none font-medium peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+					>
+						失败时保留原片（fail_open）
+					</Label>
+				</div>
+				<p class="text-muted-foreground text-xs">
+					API 或 ffmpeg 失败时只打警告并保留未裁剪文件（推荐开启）。
+				</p>
+
+				<details
+					bind:open={sponsorBlockShowAdvanced}
+					class="rounded-lg border border-border p-3"
+				>
+					<summary class="cursor-pointer text-sm font-medium">高级选项：服务器地址</summary>
+					<div class="mt-3 space-y-4">
+						<div class="space-y-2">
+							<Label for="sponsor-block-server">主服务器</Label>
+							<Input
+								id="sponsor-block-server"
+								bind:value={sponsorBlockServerAddress}
+								placeholder="https://www.bsbsb.top"
+							/>
+						</div>
+						<div class="space-y-2">
+							<Label for="sponsor-block-mirrors">镜像服务器（逗号分隔）</Label>
+							<Input
+								id="sponsor-block-mirrors"
+								bind:value={sponsorBlockMirrorsText}
+								placeholder="https://www.bsbsb.xyz"
+							/>
+							<p class="text-muted-foreground text-xs">主站失败时按顺序尝试镜像。</p>
+						</div>
+					</div>
+				</details>
+			</div>
+		</div>
+		<SheetFooter class={isMobile ? 'pb-safe border-t px-4 pt-3' : 'pb-safe border-t pt-4'}>
+			<Button type="submit" disabled={sponsorBlockSaving} class="w-full">
+				{sponsorBlockSaving ? '保存中...' : '保存设置'}
+			</Button>
 		</SheetFooter>
 	</form>
 </ResponsiveSheet>
