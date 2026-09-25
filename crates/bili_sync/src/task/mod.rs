@@ -2474,6 +2474,12 @@ impl ConfigTaskQueue {
                 ai_rename_enable_bangumi: None,
                 ai_rename_rename_parent_dir: task.ai_rename_rename_parent_dir,
                 // 服务器绑定地址，任务队列中不使用
+                sponsor_block_enabled: None,
+                sponsor_block_server_address: None,
+                sponsor_block_mirror_server_addresses: None,
+                sponsor_block_categories: None,
+                sponsor_block_keep_original: None,
+                sponsor_block_fail_open: None,
                 bind_address: None,
             };
 

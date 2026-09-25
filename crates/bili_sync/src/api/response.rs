@@ -1184,6 +1184,13 @@ pub struct SponsorBlockConfigResponse {
     pub min_keep_gap_seconds: f64,
     pub api_timeout_ms: u64,
     pub fail_open: bool,
+    /// Last heartbeat any-server ok (optional; absent until first check)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_ok: Option<bool>,
+    /// Last heartbeat timestamp (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checked_at: Option<String>,
+    pub heartbeat_interval_secs: u64,
 }
 
 // 测试风控验证响应

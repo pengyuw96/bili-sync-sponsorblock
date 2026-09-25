@@ -13,7 +13,7 @@ use super::model::SponsorSegment;
 use crate::config::SponsorBlockConfig;
 
 /// Client identity for upstream telemetry (not Chrome store ID).
-const ORIGIN: &str = "bili-sync-up";
+pub const ORIGIN: &str = "bili-sync-up";
 
 /// Local audit build tag; not an upstream release claim.
 pub const CLIENT_VERSION: &str = "3.1.0+sponsorblock";

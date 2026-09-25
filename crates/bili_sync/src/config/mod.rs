@@ -588,6 +588,10 @@ pub struct SponsorBlockConfig {
     /// API/ffmpeg 失败时保留原片并仅告警
     #[serde(default = "default_sponsor_block_fail_open")]
     pub fail_open: bool,
+    /// Background heartbeat interval (seconds). Default 300; 0 = disable periodic.
+    /// Initial probe still runs on startup when enabled.
+    #[serde(default = "default_sponsor_block_heartbeat_interval")]
+    pub heartbeat_interval_secs: u64,
 }
 
 fn default_sponsor_block_enabled() -> bool {
@@ -634,6 +638,10 @@ fn default_sponsor_block_fail_open() -> bool {
     true
 }
 
+fn default_sponsor_block_heartbeat_interval() -> u64 {
+    300
+}
+
 impl Default for SponsorBlockConfig {
     fn default() -> Self {
         Self {
@@ -648,6 +656,7 @@ impl Default for SponsorBlockConfig {
             min_keep_gap_seconds: default_sponsor_block_min_keep_gap(),
             api_timeout_ms: default_sponsor_block_api_timeout(),
             fail_open: default_sponsor_block_fail_open(),
+            heartbeat_interval_secs: default_sponsor_block_heartbeat_interval(),
         }
     }
 }

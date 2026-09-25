@@ -10881,18 +10881,24 @@ pub async fn get_config() -> Result<ApiResponse<crate::api::response::ConfigResp
             rename_parent_dir: config.ai_rename.rename_parent_dir,
         },
         // SponsorBlock 裁剪配置
-        sponsor_block: crate::api::response::SponsorBlockConfigResponse {
-            enabled: config.sponsor_block.enabled,
-            server_address: config.sponsor_block.server_address.clone(),
-            mirror_server_addresses: config.sponsor_block.mirror_server_addresses.clone(),
-            categories: config.sponsor_block.categories.clone(),
-            action_types: config.sponsor_block.action_types.clone(),
-            keep_original: config.sponsor_block.keep_original,
-            original_suffix: config.sponsor_block.original_suffix.clone(),
-            min_segment_seconds: config.sponsor_block.min_segment_seconds,
-            min_keep_gap_seconds: config.sponsor_block.min_keep_gap_seconds,
-            api_timeout_ms: config.sponsor_block.api_timeout_ms,
-            fail_open: config.sponsor_block.fail_open,
+        sponsor_block: {
+            let summary = crate::sponsorblock::health::last_health_summary();
+            crate::api::response::SponsorBlockConfigResponse {
+                enabled: config.sponsor_block.enabled,
+                server_address: config.sponsor_block.server_address.clone(),
+                mirror_server_addresses: config.sponsor_block.mirror_server_addresses.clone(),
+                categories: config.sponsor_block.categories.clone(),
+                action_types: config.sponsor_block.action_types.clone(),
+                keep_original: config.sponsor_block.keep_original,
+                original_suffix: config.sponsor_block.original_suffix.clone(),
+                min_segment_seconds: config.sponsor_block.min_segment_seconds,
+                min_keep_gap_seconds: config.sponsor_block.min_keep_gap_seconds,
+                api_timeout_ms: config.sponsor_block.api_timeout_ms,
+                fail_open: config.sponsor_block.fail_open,
+                last_ok: summary.as_ref().map(|s| s.last_ok),
+                checked_at: summary.as_ref().map(|s| s.checked_at.clone()),
+                heartbeat_interval_secs: config.sponsor_block.heartbeat_interval_secs,
+            }
         },
         // 服务器绑定地址
         bind_address: config.bind_address.clone(),
@@ -22324,4 +22330,39 @@ async fn get_videos_with_pages_for_source(
     }
 
     Ok(result)
+}
+
+
+/// SponsorBlock 服务器心跳检测（主站 + 镜像）。
+///
+/// 调用上游 `GET {server}/api/status`；不阻塞下载（fail-open）。
+/// Spec: https://github.com/hanydd/BilibiliSponsorBlock/wiki/API
+#[utoipa::path(
+    get,
+    path = "/api/sponsorblock/health",
+    responses(
+        (status = 200, body = ApiResponse<crate::sponsorblock::health::SponsorBlockHealthResponse>),
+    ),
+    security(("Token" = []))
+)]
+pub async fn get_sponsorblock_health(
+) -> Result<ApiResponse<crate::sponsorblock::health::SponsorBlockHealthResponse>, ApiError> {
+    let config = crate::config::reload_config().sponsor_block;
+    let servers = crate::sponsorblock::health::check_all(&config).await;
+    let summary = crate::sponsorblock::health::last_health_summary().unwrap_or(
+        crate::sponsorblock::health::LastHealthSummary {
+            last_ok: false,
+            checked_at: crate::utils::time_format::now_standard_string(),
+            any_ok: false,
+            primary_ok: None,
+            primary_latency_ms: None,
+        },
+    );
+    Ok(ApiResponse::ok(
+        crate::sponsorblock::health::SponsorBlockHealthResponse {
+            servers,
+            last_ok: summary.last_ok,
+            checked_at: summary.checked_at,
+        },
+    ))
 }

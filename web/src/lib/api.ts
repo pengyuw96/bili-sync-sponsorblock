@@ -15,6 +15,7 @@ import type {
 	DeleteVideoSourceResponse,
 	DeleteVideoResponse,
 	ConfigResponse,
+	SponsorBlockHealthResponse,
 	FilenamePreviewRequest,
 	FilenamePreviewResponse,
 	RefreshDanmakuResponse,
@@ -962,6 +963,10 @@ class ApiClient {
 		return this.get<ConfigResponse>('/config');
 	}
 
+	async getSponsorBlockHealth(): Promise<ApiResponse<SponsorBlockHealthResponse>> {
+		return this.get<SponsorBlockHealthResponse>('/sponsorblock/health');
+	}
+
 	/**
 	 * 更新配置
 	 * @param params 配置参数
@@ -1534,6 +1539,7 @@ export const api = {
 	 * 获取配置
 	 */
 	getConfig: () => apiClient.getConfig(),
+	getSponsorBlockHealth: () => apiClient.getSponsorBlockHealth(),
 
 	/**
 	 * 更新配置

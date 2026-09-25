@@ -82,6 +82,7 @@ use crate::api::handler::{
     get_bangumi_sources_for_merge,
     get_beta_image_update_status,
     get_config,
+    get_sponsorblock_health,
     get_config_history,
     // 新增配置管理API
     get_config_item,
@@ -298,6 +299,7 @@ pub async fn http_server(_database_connection: Arc<DatabaseConnection>) -> Resul
         .route("/api/queue/live", get(stream_queue_status))
         .route("/api/reload-config", post(reload_config))
         .route("/api/config", get(get_config))
+        .route("/api/sponsorblock/health", get(get_sponsorblock_health))
         .route("/api/config", put(update_config))
         .route("/api/config/name-preview", post(preview_filename_templates))
         // 新的配置管理API路由
