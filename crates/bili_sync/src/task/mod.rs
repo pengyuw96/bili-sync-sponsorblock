@@ -2480,6 +2480,7 @@ impl ConfigTaskQueue {
                 sponsor_block_server_address: None,
                 sponsor_block_mirror_server_addresses: None,
                 sponsor_block_categories: None,
+                sponsor_block_mark_categories: None,
                 sponsor_block_keep_original: None,
                 sponsor_block_fail_open: None,
                 bind_address: None,

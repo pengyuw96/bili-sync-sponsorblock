@@ -358,6 +358,7 @@ pub struct UpdateConfigRequest {
     pub sponsor_block_server_address: Option<String>,
     pub sponsor_block_mirror_server_addresses: Option<Vec<String>>,
     pub sponsor_block_categories: Option<Vec<String>>,
+    pub sponsor_block_mark_categories: Option<Vec<String>>,
     pub sponsor_block_keep_original: Option<bool>,
     pub sponsor_block_fail_open: Option<bool>,
     // 服务器绑定地址
