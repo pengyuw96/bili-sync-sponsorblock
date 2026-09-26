@@ -181,6 +181,10 @@
 		switch (code) {
 			case 'cut':
 				return '已剪切';
+			case 'marked':
+				return '已标记章节';
+			case 'cut_and_marked':
+				return '已剪切并标记';
 			case 'none':
 				return '已对比，无片段';
 			case 'disabled':
@@ -191,9 +195,9 @@
 				return '片段过多已保留原片';
 			case 'failed_open':
 			case 'error':
-				return '剪切失败（保留原片）';
+				return '处理失败（保留原片）';
 			default:
-				return code ? `剪切：${code}` : '';
+				return code ? `SponsorBlock：${code}` : '';
 		}
 	}
 

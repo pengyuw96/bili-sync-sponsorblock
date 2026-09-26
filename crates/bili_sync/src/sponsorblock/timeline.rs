@@ -165,3 +165,121 @@ mod tests {
         assert!(result.is_empty());
     }
 }
+
+/// Subtract duration of all removed intervals that end at or before `t`.
+/// If `t` falls inside a remove interval, clamp to the interval start then subtract
+/// prior removes (so in-remove timestamps collapse to the cut seam).
+pub fn remap_timestamp_after_removes(t: f64, removes: &[(f64, f64)]) -> f64 {
+    if !t.is_finite() {
+        return t;
+    }
+    let removes = merge_remove_intervals(removes, 1e-6);
+    let mut offset = 0.0_f64;
+    for (s, e) in &removes {
+        if *e <= t {
+            offset += e - s;
+        } else if *s < t {
+            // Inside a removed region: collapse to the cut seam (start of remove),
+            // after subtracting only prior fully-removed intervals.
+            return (*s - offset).max(0.0);
+        } else {
+            break;
+        }
+    }
+    (t - offset).max(0.0)
+}
+
+/// Remap a mark `[start, end]` after cuts. Returns `None` if the mark vanishes
+/// (fully inside a cut, or zero/negative length after remap).
+pub fn remap_mark_interval(
+    start: f64,
+    end: f64,
+    removes: &[(f64, f64)],
+    new_duration: f64,
+) -> Option<(f64, f64)> {
+    if !(start.is_finite() && end.is_finite()) || end <= start {
+        return None;
+    }
+    // Drop marks fully covered by a single remove interval.
+    for (s, e) in merge_remove_intervals(removes, 1e-6) {
+        if start >= s && end <= e {
+            return None;
+        }
+    }
+    let mut rs = remap_timestamp_after_removes(start, removes);
+    let mut re = remap_timestamp_after_removes(end, removes);
+    if new_duration.is_finite() && new_duration > 0.0 {
+        rs = rs.clamp(0.0, new_duration);
+        re = re.clamp(0.0, new_duration);
+    }
+    if re - rs < 1e-3 {
+        return None;
+    }
+    Some((rs, re))
+}
+
+/// Approximate post-cut duration = original − merged remove length (clamped).
+pub fn duration_after_removes(duration: f64, removes: &[(f64, f64)]) -> f64 {
+    if !(duration.is_finite() && duration > 0.0) {
+        return 0.0;
+    }
+    let removed: f64 = merge_remove_intervals(removes, 1e-6)
+        .iter()
+        .map(|(s, e)| {
+            let s = s.clamp(0.0, duration);
+            let e = e.clamp(0.0, duration);
+            (e - s).max(0.0)
+        })
+        .sum();
+    (duration - removed).max(0.0)
+}
+
+#[cfg(test)]
+mod remap_tests {
+    use super::*;
+
+    #[test]
+    fn remap_after_single_intro_cut() {
+        let removes = [(0.0, 20.0)];
+        assert!((remap_timestamp_after_removes(0.0, &removes) - 0.0).abs() < 1e-6);
+        assert!((remap_timestamp_after_removes(20.0, &removes) - 0.0).abs() < 1e-6);
+        assert!((remap_timestamp_after_removes(50.0, &removes) - 30.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn remap_after_two_cuts() {
+        let removes = [(10.0, 20.0), (50.0, 60.0)];
+        // Mark starting at 70 → subtract 10+10 = 20 → 50
+        assert!((remap_timestamp_after_removes(70.0, &removes) - 50.0).abs() < 1e-6);
+        // Mark at 30 (between cuts) → subtract only first 10 → 20
+        assert!((remap_timestamp_after_removes(30.0, &removes) - 20.0).abs() < 1e-6);
+        // Inside second cut → collapse to seam at 50 → remapped 40
+        assert!((remap_timestamp_after_removes(55.0, &removes) - 40.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn remap_mark_drops_fully_cut_segment() {
+        let removes = [(10.0, 30.0)];
+        assert_eq!(remap_mark_interval(12.0, 25.0, &removes, 100.0), None);
+    }
+
+    #[test]
+    fn remap_mark_typical_after_cut() {
+        let removes = [(0.0, 20.934)];
+        let (s, e) = remap_mark_interval(90.0, 100.0, &removes, 99.066).unwrap();
+        assert!((s - 69.066).abs() < 1e-3);
+        assert!((e - 79.066).abs() < 1e-3);
+    }
+
+    #[test]
+    fn remap_noop_without_removes() {
+        let (s, e) = remap_mark_interval(10.0, 20.0, &[], 100.0).unwrap();
+        assert!((s - 10.0).abs() < 1e-9);
+        assert!((e - 20.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn duration_after_removes_basic() {
+        assert!((duration_after_removes(100.0, &[(10.0, 20.0), (50.0, 60.0)]) - 80.0).abs() < 1e-6);
+    }
+}

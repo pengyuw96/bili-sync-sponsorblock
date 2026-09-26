@@ -1235,6 +1235,7 @@ pub struct SponsorBlockConfigResponse {
     pub server_address: String,
     pub mirror_server_addresses: Vec<String>,
     pub categories: Vec<String>,
+    pub mark_categories: Vec<String>,
     pub action_types: Vec<String>,
     pub keep_original: bool,
     pub original_suffix: String,

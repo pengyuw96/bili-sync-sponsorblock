@@ -264,7 +264,7 @@ pub struct Config {
     #[serde(default)]
     pub risk_control: RiskControlConfig,
 
-    /// BilibiliSponsorBlock 风格片头/赞助片段裁剪（仅 B 站分页下载路径）
+    /// BilibiliSponsorBlock 风格裁剪 / 章节标记（仅 B 站分页下载路径）
     #[serde(default)]
     pub sponsor_block: SponsorBlockConfig,
 
@@ -567,6 +567,9 @@ pub struct SponsorBlockConfig {
     /// 要裁剪的类别（默认保守：sponsor + padding）
     #[serde(default = "default_sponsor_block_categories")]
     pub categories: Vec<String>,
+    /// 章节标记类别（嵌入 Matroska/MP4 chapters，供 Emby/Jellyfin 时间轴手动跳过；默认空）
+    #[serde(default = "default_sponsor_block_mark_categories")]
+    pub mark_categories: Vec<String>,
     /// 动作类型（MVP 仅处理 skip）
     #[serde(default = "default_sponsor_block_action_types")]
     pub action_types: Vec<String>,
@@ -610,6 +613,10 @@ fn default_sponsor_block_categories() -> Vec<String> {
     vec!["sponsor".to_string(), "padding".to_string()]
 }
 
+fn default_sponsor_block_mark_categories() -> Vec<String> {
+    Vec::new()
+}
+
 fn default_sponsor_block_action_types() -> Vec<String> {
     vec!["skip".to_string()]
 }
@@ -649,6 +656,7 @@ impl Default for SponsorBlockConfig {
             server_address: default_sponsor_block_server(),
             mirror_server_addresses: default_sponsor_block_mirrors(),
             categories: default_sponsor_block_categories(),
+            mark_categories: default_sponsor_block_mark_categories(),
             action_types: default_sponsor_block_action_types(),
             keep_original: default_sponsor_block_keep_original(),
             original_suffix: default_sponsor_block_original_suffix(),

@@ -10895,6 +10895,7 @@ pub async fn get_config() -> Result<ApiResponse<crate::api::response::ConfigResp
                 server_address: config.sponsor_block.server_address.clone(),
                 mirror_server_addresses: config.sponsor_block.mirror_server_addresses.clone(),
                 categories: config.sponsor_block.categories.clone(),
+                mark_categories: config.sponsor_block.mark_categories.clone(),
                 action_types: config.sponsor_block.action_types.clone(),
                 keep_original: config.sponsor_block.keep_original,
                 original_suffix: config.sponsor_block.original_suffix.clone(),
@@ -12912,18 +12913,38 @@ pub async fn update_config_internal(
         }
     }
     if let Some(categories) = &params.sponsor_block_categories {
-        let normalized: Vec<String> = categories
+        // Allow empty cut list (mark-only mode); do not force defaults on explicit empty.
+        let final_categories: Vec<String> = categories
             .iter()
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
-        let final_categories = if normalized.is_empty() {
-            default_sponsor_block.categories.clone()
-        } else {
-            normalized
-        };
         if config.sponsor_block.categories != final_categories {
             config.sponsor_block.categories = final_categories;
+            updated_fields.push("sponsor_block");
+        }
+    }
+    if let Some(mark_categories) = &params.sponsor_block_mark_categories {
+        let normalized: Vec<String> = mark_categories
+            .iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if config.sponsor_block.mark_categories != normalized {
+            config.sponsor_block.mark_categories = normalized;
+            updated_fields.push("sponsor_block");
+        }
+    }
+    // Cut wins: strip mark categories that also appear in cut list.
+    if params.sponsor_block_categories.is_some() || params.sponsor_block_mark_categories.is_some() {
+        let cut_set: std::collections::HashSet<String> =
+            config.sponsor_block.categories.iter().cloned().collect();
+        let before = config.sponsor_block.mark_categories.len();
+        config
+            .sponsor_block
+            .mark_categories
+            .retain(|c| !cut_set.contains(c));
+        if config.sponsor_block.mark_categories.len() != before {
             updated_fields.push("sponsor_block");
         }
     }

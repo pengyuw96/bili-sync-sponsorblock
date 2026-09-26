@@ -16,7 +16,7 @@ use crate::config::SponsorBlockConfig;
 pub const ORIGIN: &str = "bili-sync-up";
 
 /// Local audit build tag; not an upstream release claim.
-pub const CLIENT_VERSION: &str = "3.1.2+sponsorblock";
+pub const CLIENT_VERSION: &str = "3.1.2+sponsorblock-mark";
 
 pub struct SponsorBlockClient {
     http: reqwest::Client,
@@ -40,14 +40,28 @@ impl SponsorBlockClient {
         Ok(Self { http })
     }
 
-    /// Fetch skip segments for `(bvid, cid)`, trying primary then mirrors.
-    ///
-    /// 404 / empty array → Ok(vec![]). Network/5xx → Err after all mirrors fail.
+    /// Fetch skip segments for `(bvid, cid)` using configured cut categories.
+    #[allow(dead_code)]
     pub async fn fetch_skip_segments(
         &self,
         config: &SponsorBlockConfig,
         bvid: &str,
         cid: i64,
+    ) -> Result<Vec<SponsorSegment>> {
+        self.fetch_skip_segments_for_categories(config, bvid, cid, &config.categories)
+            .await
+    }
+
+    /// Fetch skip segments for `(bvid, cid)` with an explicit category list
+    /// (union of cut + mark categories), trying primary then mirrors.
+    ///
+    /// 404 / empty array → Ok(vec![]). Network/5xx → Err after all mirrors fail.
+    pub async fn fetch_skip_segments_for_categories(
+        &self,
+        config: &SponsorBlockConfig,
+        bvid: &str,
+        cid: i64,
+        categories: &[String],
     ) -> Result<Vec<SponsorSegment>> {
         let mut servers = Vec::with_capacity(1 + config.mirror_server_addresses.len());
         servers.push(config.server_address.trim().trim_end_matches('/').to_string());
@@ -58,7 +72,7 @@ impl SponsorBlockClient {
             }
         }
 
-        let categories_json = serde_json::to_string(&config.categories).unwrap_or_else(|_| "[]".to_string());
+        let categories_json = serde_json::to_string(categories).unwrap_or_else(|_| "[]".to_string());
         let action_types_json = serde_json::to_string(&config.action_types).unwrap_or_else(|_| "[\"skip\"]".to_string());
 
         let mut last_err: Option<anyhow::Error> = None;

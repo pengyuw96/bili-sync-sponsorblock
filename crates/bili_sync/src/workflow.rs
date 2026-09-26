@@ -507,7 +507,11 @@ async fn run_page_sponsor_cut(
                 crate::sponsorblock::SponsorCutOutcome::Noop
                 | crate::sponsorblock::SponsorCutOutcome::WouldRemoveAll
                 | crate::sponsorblock::SponsorCutOutcome::FailedOpen
-                | crate::sponsorblock::SponsorCutOutcome::Cut { .. } => ExecutionStatus::Succeeded,
+                | crate::sponsorblock::SponsorCutOutcome::Cut { .. }
+                | crate::sponsorblock::SponsorCutOutcome::Marked { .. }
+                | crate::sponsorblock::SponsorCutOutcome::CutAndMarked { .. } => {
+                    ExecutionStatus::Succeeded
+                }
             };
             (status, Some(code))
         }

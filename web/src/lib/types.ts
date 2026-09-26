@@ -715,6 +715,7 @@ export interface SponsorBlockConfig {
 	server_address: string;
 	mirror_server_addresses: string[];
 	categories: string[];
+	mark_categories: string[];
 	action_types: string[];
 	keep_original: boolean;
 	original_suffix: string;
@@ -878,6 +879,7 @@ export interface UpdateConfigRequest {
 	sponsor_block_server_address?: string;
 	sponsor_block_mirror_server_addresses?: string[];
 	sponsor_block_categories?: string[];
+	sponsor_block_mark_categories?: string[];
 	sponsor_block_keep_original?: boolean;
 	sponsor_block_fail_open?: boolean;
 	// 服务器绑定地址

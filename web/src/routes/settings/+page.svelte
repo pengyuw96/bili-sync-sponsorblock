@@ -154,8 +154,8 @@
 		},
 		{
 			id: 'sponsor_block',
-			title: 'SponsorBlock 裁剪',
-			description: '下载后裁剪赞助/垫片片段',
+			title: 'SponsorBlock',
+			description: '裁剪赞助段，或标记章节供 Emby/Jellyfin 手动跳过',
 			icon: ScissorsIcon
 		},
 		{
@@ -195,7 +195,7 @@
 		notification: '配置扫描完成后的推送渠道、测试发送和通知内容。',
 		ai_rename: '配置 AI 自动重命名的启用范围、提示词和相关行为。',
 		sponsor_block:
-			'下载合并后按 BilibiliSponsorBlock 片段用 ffmpeg 裁掉赞助段；与「下载后按章节切分」互斥；弹幕字幕可能不同步。',
+			'下载合并后按 BilibiliSponsorBlock 片段裁剪或嵌入章节标记；裁剪与标记互斥同一类别（裁剪优先）；与「下载后按章节切分」互斥；弹幕字幕可能不同步。',
 		system: '调整扫描间隔、监听端口、路径模板和基础系统行为。',
 		database: '查看数据库文件信息与各表数据量；可清理图片代理缓存、AI 对话历史、任务队列历史与孤立记录，执行 VACUUM 压缩或备份数据库。'
 	} as const;
@@ -475,6 +475,7 @@
 	] as const;
 	let sponsorBlockEnabled = false;
 	let sponsorBlockCategories: string[] = ['sponsor', 'padding'];
+	let sponsorBlockMarkCategories: string[] = [];
 	let sponsorBlockKeepOriginal = false;
 	let sponsorBlockFailOpen = true;
 	let sponsorBlockServerAddress = 'https://www.bsbsb.top';
@@ -492,8 +493,22 @@
 			if (!sponsorBlockCategories.includes(category)) {
 				sponsorBlockCategories = [...sponsorBlockCategories, category];
 			}
+			// Cut wins: remove from mark list
+			sponsorBlockMarkCategories = sponsorBlockMarkCategories.filter((c) => c !== category);
 		} else {
 			sponsorBlockCategories = sponsorBlockCategories.filter((c) => c !== category);
+		}
+	}
+
+	function toggleSponsorBlockMarkCategory(category: string, checked: boolean) {
+		if (checked) {
+			// Cannot mark a category that is already selected for cut
+			if (sponsorBlockCategories.includes(category)) return;
+			if (!sponsorBlockMarkCategories.includes(category)) {
+				sponsorBlockMarkCategories = [...sponsorBlockMarkCategories, category];
+			}
+		} else {
+			sponsorBlockMarkCategories = sponsorBlockMarkCategories.filter((c) => c !== category);
 		}
 	}
 
@@ -887,10 +902,14 @@
 
 		// SponsorBlock 裁剪配置
 		sponsorBlockEnabled = config.sponsor_block?.enabled ?? false;
-		sponsorBlockCategories =
-			config.sponsor_block?.categories?.length
-				? [...config.sponsor_block.categories]
-				: ['sponsor', 'padding'];
+		sponsorBlockCategories = Array.isArray(config.sponsor_block?.categories)
+			? [...config.sponsor_block.categories]
+			: ['sponsor', 'padding'];
+		sponsorBlockMarkCategories = Array.isArray(config.sponsor_block?.mark_categories)
+			? [...config.sponsor_block.mark_categories].filter(
+					(c) => !sponsorBlockCategories.includes(c)
+				)
+			: [];
 		sponsorBlockKeepOriginal = config.sponsor_block?.keep_original ?? false;
 		sponsorBlockFailOpen = config.sponsor_block?.fail_open ?? true;
 		sponsorBlockServerAddress = config.sponsor_block?.server_address || 'https://www.bsbsb.top';
@@ -1813,11 +1832,14 @@
 			.split(/[,\n]/)
 			.map((s) => s.trim())
 			.filter(Boolean);
-		const categories =
-			sponsorBlockCategories.length > 0 ? sponsorBlockCategories : ['sponsor', 'padding'];
+		const categories = [...sponsorBlockCategories];
+		const markCategories = sponsorBlockMarkCategories.filter(
+			(c) => !categories.includes(c)
+		);
 		const config: UpdateConfigRequest = {
 			sponsor_block_enabled: sponsorBlockEnabled,
 			sponsor_block_categories: categories,
+			sponsor_block_mark_categories: markCategories,
 			sponsor_block_keep_original: sponsorBlockKeepOriginal,
 			sponsor_block_fail_open: sponsorBlockFailOpen,
 			sponsor_block_server_address: sponsorBlockServerAddress.trim(),
@@ -5415,8 +5437,8 @@
 	onOpenChange={(open) => {
 		if (!open) openSheet = null;
 	}}
-	title="SponsorBlock 裁剪"
-	description="下载合并后按社区标注片段裁剪赞助/垫片"
+	title="SponsorBlock"
+	description="裁剪赞助段，或嵌入章节标记供播放器时间轴手动跳过"
 	titleTooltip={getSettingTooltip('sponsor_block')}
 	{isMobile}
 >
@@ -5433,7 +5455,7 @@
 			>
 				<h4 class="mb-2 font-medium text-amber-800 dark:text-amber-400">功能说明</h4>
 				<p class="text-sm text-amber-700 dark:text-amber-300">
-					下载合并后按 BilibiliSponsorBlock 片段用 ffmpeg 裁掉赞助段；与「下载后按章节切分」互斥；弹幕字幕可能不同步。
+					下载合并后按 BilibiliSponsorBlock 片段：可「裁剪」直接去掉，或「章节标记」嵌入时间轴供 Emby/Jellyfin 手动跳转（不会自动跳过）。同一类别不可同时勾选（裁剪优先）。与「下载后按章节切分」互斥；弹幕字幕在裁剪后可能不同步。
 				</p>
 				<p class="mt-2 text-xs text-amber-600 dark:text-amber-400">
 					片段数据来自
@@ -5459,11 +5481,11 @@
 						for="sponsor-block-enabled"
 						class="text-sm leading-none font-medium peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
 					>
-						启用 SponsorBlock 裁剪
+						启用 SponsorBlock
 					</Label>
 				</div>
 				<p class="text-muted-foreground text-sm">
-					开启后，B 站视频合并成功即按类别裁剪；若该源启用了「下载后按章节切分」则会跳过裁剪。
+					开启后，B 站视频合并成功即按下方勾选的类别裁剪和/或标记章节；若该源启用了「下载后按章节切分」则会跳过裁剪与标记。
 				</p>
 
 				<div class="space-y-2">
@@ -5485,7 +5507,32 @@
 							</label>
 						{/each}
 					</div>
-					<p class="text-muted-foreground text-xs">默认仅勾选赞助广告与垫片，建议保持保守。</p>
+					<p class="text-muted-foreground text-xs">默认仅勾选赞助广告与垫片；勾选后用 ffmpeg 流拷贝裁掉对应片段。</p>
+				</div>
+
+				<div class="space-y-2">
+					<Label>章节标记类别</Label>
+					<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+						{#each SPONSOR_BLOCK_CATEGORY_OPTIONS as opt}
+							<label class="flex items-center space-x-2 text-sm {sponsorBlockCategories.includes(opt.value) ? 'opacity-50' : ''}">
+								<input
+									type="checkbox"
+									disabled={sponsorBlockCategories.includes(opt.value)}
+									checked={sponsorBlockMarkCategories.includes(opt.value)}
+									onchange={(e) =>
+										toggleSponsorBlockMarkCategory(
+											opt.value,
+											(e.currentTarget as HTMLInputElement).checked
+										)}
+									class="text-primary focus:ring-primary h-4 w-4 rounded border-gray-300 disabled:cursor-not-allowed"
+								/>
+								<span>{opt.label}</span>
+							</label>
+						{/each}
+					</div>
+					<p class="text-sm text-amber-700 dark:text-amber-300">
+						标记会嵌入 Matroska/MP4 章节，供 Emby/Jellyfin 时间轴手动跳转，不会像浏览器插件那样自动跳过。已在「裁剪类别」勾选的项会自动禁用。
+					</p>
 				</div>
 
 				<div class="flex items-center space-x-2">
@@ -5521,7 +5568,7 @@
 					</Label>
 				</div>
 				<p class="text-muted-foreground text-xs">
-					API 或 ffmpeg 失败时只打警告并保留未裁剪文件（推荐开启）。
+					API / ffmpeg 裁剪或章节嵌入失败时只打警告并保留媒体文件（推荐开启）。
 				</p>
 
 				<div
