@@ -66,6 +66,17 @@ impl<const N: usize> Status<N> {
         changed
     }
 
+    /// 当新增子任务后，旧行可能仍带着 completed 高位，但新槽位 should_run=true。
+    /// 在下载入口调用一次，清掉高位以便只跑未完成槽位。
+    pub fn reconcile_completed(&mut self) -> bool {
+        if self.should_run().into_iter().any(|x| x) && self.get_completed() {
+            self.set_completed(false);
+            true
+        } else {
+            false
+        }
+    }
+
     /// 覆盖某个子任务的状态
     pub fn set(&mut self, offset: usize, status: u32) {
         assert!(status < 0b1000, "status should be less than 0b1000");
@@ -190,12 +201,14 @@ pub const VIDEO_STATUS_UPPER_FACE_INDEX: usize = 2;
 pub const VIDEO_STATUS_PAGE_DOWNLOAD_INDEX: usize = 4;
 
 pub const PAGE_STATUS_NFO_INDEX: usize = 2;
+/// 分页第 6 个子任务：SponsorBlock 视频剪切（BilibiliSponsorBlock）
+pub const PAGE_STATUS_SPONSOR_CUT_INDEX: usize = 5;
 
 /// 包含五个子任务，从前到后依次是：视频封面、视频信息、Up 主头像、Up 主信息、分 P 下载
 pub type VideoStatus = Status<5>;
 
-/// 包含五个子任务，从前到后分别是：视频封面、视频内容、视频信息、视频弹幕、视频字幕
-pub type PageStatus = Status<5>;
+/// 包含六个子任务，从前到后分别是：视频封面、视频内容、视频信息、视频弹幕、视频字幕、视频剪切(SponsorBlock)
+pub type PageStatus = Status<6>;
 
 #[cfg(test)]
 mod test {

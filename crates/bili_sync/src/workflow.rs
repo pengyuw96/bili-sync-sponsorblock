@@ -473,7 +473,55 @@ fn is_bili_request_failed_inaccessible(err: &anyhow::Error) -> bool {
     is_bili_request_failed_with_codes(err, &[-404, 62002, 62012])
 }
 
-fn first_inaccessible_page_error(results: &[Result<ExecutionStatus>; 5]) -> Option<&anyhow::Error> {
+
+/// Map SponsorBlock cut outcome to page slot ExecutionStatus + persisted result code.
+async fn run_page_sponsor_cut(
+    page_path: &Path,
+    video_model: &video::Model,
+    page_info: &PageInfo,
+    skip_for_chapters: bool,
+) -> (ExecutionStatus, Option<String>) {
+    let sb_config = crate::config::reload_config().sponsor_block.clone();
+    match crate::sponsorblock::maybe_cut_sponsor_segments(
+        page_path,
+        &video_model.bvid,
+        page_info.cid,
+        page_info.duration,
+        &sb_config,
+        skip_for_chapters,
+    )
+    .await
+    {
+        Ok(outcome) => {
+            debug!(
+                "SponsorBlock outcome for {} cid={}: {:?}",
+                video_model.bvid, page_info.cid, outcome
+            );
+            let code = outcome.result_code().to_string();
+            let status = match &outcome {
+                crate::sponsorblock::SponsorCutOutcome::Disabled
+                | crate::sponsorblock::SponsorCutOutcome::SkippedForChapters => {
+                    ExecutionStatus::Skipped
+                }
+                // Fail-open / noop / cut all count as succeeded so the page can complete.
+                crate::sponsorblock::SponsorCutOutcome::Noop
+                | crate::sponsorblock::SponsorCutOutcome::WouldRemoveAll
+                | crate::sponsorblock::SponsorCutOutcome::FailedOpen
+                | crate::sponsorblock::SponsorCutOutcome::Cut { .. } => ExecutionStatus::Succeeded,
+            };
+            (status, Some(code))
+        }
+        Err(e) => {
+            warn!(
+                "SponsorBlock cut hard error for {} cid={}: {:#}",
+                video_model.bvid, page_info.cid, e
+            );
+            (ExecutionStatus::Failed(e), Some("error".to_string()))
+        }
+    }
+}
+
+fn first_inaccessible_page_error(results: &[Result<ExecutionStatus>; 6]) -> Option<&anyhow::Error> {
     results
         .iter()
         .filter_map(|res| res.as_ref().err())
@@ -2197,7 +2245,7 @@ pub async fn fetch_video_details(
                                     );
 
                                     let ok_video_status: u32 = VideoStatus::from([STATUS_OK; 5]).into();
-                                    let ok_page_status: u32 = PageStatus::from([STATUS_OK; 5]).into();
+                                    let ok_page_status: u32 = PageStatus::from([STATUS_OK; 6]).into();
 
                                     video::Entity::update(video::ActiveModel {
                                         id: Unchanged(video_id),
@@ -4191,6 +4239,7 @@ async fn download_video_pages(
                 audio_stream_size_bytes: None,
                 image: None,
                 download_status: 0,
+                sponsor_cut_result: None,
                 created_at: now_standard_string(),
                 play_video_streams: None,
                 play_audio_streams: None,
@@ -6080,7 +6129,7 @@ async fn download_video_pages(
         }
 
         // 立即修复数据库分页状态，避免前端仍显示“分页未完成”
-        let ok_page_status: u32 = PageStatus::from([STATUS_OK; 5]).into();
+        let ok_page_status: u32 = PageStatus::from([STATUS_OK; 6]).into();
         let txn =
             crate::database::begin_traced_transaction(connection, "workflow.mark_charge_video_placeholder_complete")
                 .await?;
@@ -6608,7 +6657,7 @@ async fn dispatch_download_page(args: DownloadPageArgs<'_>, token: CancellationT
                 // 这样会导致即使分页中有失败到 MAX_RETRY 的情况，视频层的分 P 下载状态也会被认为是 Succeeded，不够准确
                 // 新版本实现会将此处取值为所有子任务状态的最小值，这样只有所有分页的子任务全部成功时才会认为视频层的分 P 下载状态是 Succeeded
                 let page_download_status = *model.download_status.try_as_ref().expect("download_status must be set");
-                let separate_status: [u32; 5] = PageStatus::from(page_download_status).into();
+                let separate_status: [u32; 6] = PageStatus::from(page_download_status).into();
                 for status in separate_status {
                     target_status = target_status.min(status);
                 }
@@ -6921,6 +6970,8 @@ async fn download_page(
     };
     let original_page_model = page_model.clone();
     let mut status = PageStatus::from(page_model.download_status);
+    // PageStatus 5→6: old completed rows may still have bit31 while slot5 should_run.
+    status.reconcile_completed();
     let mut separate_status = status.should_run();
     let is_single_page = video_model.single_page.context("single_page is null")?;
 
@@ -6944,6 +6995,7 @@ async fn download_page(
         separate_status[2] = false; // 跳过NFO
         separate_status[3] = false; // 跳过弹幕
         separate_status[4] = false; // 跳过字幕
+        separate_status[5] = false; // 跳过 SponsorBlock 剪切（纯音频不适用）
     }
 
     // 检查是否为番剧
@@ -7363,7 +7415,6 @@ async fn download_page(
         audio_only,
         video_source.download_charge_videos(),
         filter_option,
-        skip_sponsor_cut_for_chapters,
         token.clone(),
     ));
     let res_3_fut = Box::pin(generate_page_nfo(
@@ -7486,7 +7537,58 @@ async fn download_page(
         Err(err) => (Err(err), None),
     };
 
-    let raw_results = [res_1, res_2, res_3, res_4, res_5];
+    // Slot 5: SponsorBlock 视频剪切（验收位）。媒体已存在时可单独重跑，不必重下。
+    let mut sponsor_cut_result: Option<String> = None;
+    let res_6: Result<ExecutionStatus> = if !separate_status[5] {
+        Ok(ExecutionStatus::Skipped)
+    } else if skip_sidecars {
+        Ok(ExecutionStatus::Skipped)
+    } else if m4a_only_mode {
+        sponsor_cut_result = Some("disabled".to_string());
+        Ok(ExecutionStatus::Skipped)
+    } else {
+        let cut_path = if video_path.exists() {
+            video_path.clone()
+        } else if let Some(existing) = page_model.path.as_ref() {
+            std::path::PathBuf::from(existing)
+        } else {
+            video_path.clone()
+        };
+        let media_ready = tokio::fs::metadata(&cut_path)
+            .await
+            .map(|m| m.is_file() && m.len() > 0)
+            .unwrap_or(false);
+        let media_slot_ok = matches!(
+            &res_2,
+            Ok(ExecutionStatus::Succeeded) | Ok(ExecutionStatus::Skipped)
+        );
+        if !media_ready {
+            sponsor_cut_result = Some("none".to_string());
+            Ok(ExecutionStatus::Succeeded)
+        } else if !media_slot_ok {
+            // 媒体槽本轮未成功且文件异常：跳过，保留可重试
+            Ok(ExecutionStatus::Skipped)
+        } else {
+            let (st, code) = run_page_sponsor_cut(
+                &cut_path,
+                video_model,
+                &page_info,
+                skip_sponsor_cut_for_chapters,
+            )
+            .await;
+            sponsor_cut_result = code;
+            if matches!(st, ExecutionStatus::Succeeded)
+                && sponsor_cut_result.as_deref() == Some("cut")
+            {
+                if let Ok(meta) = tokio::fs::metadata(&cut_path).await {
+                    page_file_size_bytes = Some(to_db_file_size(meta.len()));
+                }
+            }
+            Ok(st)
+        }
+    };
+
+    let raw_results = [res_1, res_2, res_3, res_4, res_5, res_6];
     let inaccessible_reason = first_inaccessible_page_error(&raw_results).map(inaccessible_reason_from_error);
     let mut results = raw_results.into_iter().map(Into::into).collect::<Vec<_>>();
 
@@ -7506,7 +7608,7 @@ async fn download_page(
         .exec(connection)
         .await?;
 
-        status = PageStatus::from([STATUS_OK; 5]);
+        status = PageStatus::from([STATUS_OK; 6]);
         for (idx, should_run) in separate_status.iter().enumerate() {
             if *should_run {
                 results[idx] = ExecutionStatus::Skipped;
@@ -7520,7 +7622,7 @@ async fn download_page(
 
     results
         .iter()
-        .zip(["封面", "视频", "详情", "弹幕", "字幕"])
+        .zip(["封面", "视频", "详情", "弹幕", "字幕", "剪切"])
         .for_each(|(res, task_name)| match res {
             ExecutionStatus::Skipped => debug!(
                 "处理视频「{}」第 {} 页{}已成功过，跳过",
@@ -7974,6 +8076,9 @@ async fn download_page(
     let mut page_active_model: page::ActiveModel = page_model.into();
     page_active_model.download_status = Set(status.into());
     page_active_model.path = Set(final_page_path);
+    if let Some(code) = sponsor_cut_result {
+        page_active_model.sponsor_cut_result = Set(Some(code));
+    }
     if let Some(sync_update) = danmaku_sync_update.as_ref() {
         sync_update.apply_to_active_model(&mut page_active_model);
     }
@@ -9186,7 +9291,6 @@ async fn fetch_page_video(
     audio_only: bool,
     download_charge_videos: bool,
     filter_option: &FilterOption,
-    skip_sponsor_cut_for_chapters: bool,
     token: CancellationToken,
 ) -> Result<PageVideoFetchResult> {
     if !should_run {
@@ -9343,41 +9447,7 @@ async fn fetch_page_video(
         .await;
 
         match download_result {
-            Ok(mut result) => {
-                // BilibiliSponsorBlock-style cut (Bilibili path only; after merge).
-                // Fail-open; mutual exclusion with chapter split via skip_sponsor_cut_for_chapters.
-                if matches!(result.status, ExecutionStatus::Succeeded) && page_path.exists() {
-                    let sb_config = crate::config::reload_config().sponsor_block.clone();
-                    if sb_config.enabled {
-                        match crate::sponsorblock::maybe_cut_sponsor_segments(
-                            page_path,
-                            &video_model.bvid,
-                            page_info_for_download.cid,
-                            page_info_for_download.duration,
-                            &sb_config,
-                            skip_sponsor_cut_for_chapters,
-                        )
-                        .await
-                        {
-                            Ok(outcome) => {
-                                debug!("SponsorBlock outcome for {} cid={}: {:?}", video_model.bvid, page_info_for_download.cid, outcome);
-                                if let crate::sponsorblock::SponsorCutOutcome::Cut { .. } = outcome {
-                                    if let Ok(meta) = tokio::fs::metadata(page_path).await {
-                                        result.file_size_bytes = Some(to_db_file_size(meta.len()));
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                // fail_open=false path: do not fail the whole download slot hard unless configured;
-                                // still surface as warn and keep file (defensive).
-                                warn!(
-                                    "SponsorBlock cut error (keeping download success): {} cid={}: {:#}",
-                                    video_model.bvid, page_info_for_download.cid, e
-                                );
-                            }
-                        }
-                    }
-                }
+            Ok(result) => {
                 return Ok(result);
             }
             Err(e)
@@ -10117,7 +10187,7 @@ async fn sync_chapter_pages_after_split(
         return Ok(());
     }
 
-    let ok_page_status: u32 = PageStatus::from([STATUS_OK; 5]).into();
+    let ok_page_status: u32 = PageStatus::from([STATUS_OK; 6]).into();
     let chapter_count: i32 = outcome
         .files
         .len()
@@ -10162,6 +10232,7 @@ async fn sync_chapter_pages_after_split(
             audio_stream_size_bytes: Set(None),
             image: Set(source_page.image.clone()),
             download_status: Set(ok_page_status),
+            sponsor_cut_result: Set(None),
             created_at: Set(created_at),
             play_video_streams: Set(None),
             play_audio_streams: Set(None),
@@ -15570,6 +15641,7 @@ mod tests {
             audio_stream_size_bytes: Set(None),
             image: Set(None),
             download_status: Set(download_status),
+            sponsor_cut_result: Set(None),
             created_at: Set("2026-01-01 00:00:00".to_string()),
             play_video_streams: Set(None),
             play_audio_streams: Set(None),
@@ -15593,8 +15665,8 @@ mod tests {
         insert_test_submission(&db, 2, false, false).await;
 
         let incomplete_video_status = u32::from(VideoStatus::from([STATUS_OK, 2, STATUS_OK, 4, 0]));
-        let incomplete_page_status = u32::from(PageStatus::from([STATUS_OK, 2, STATUS_OK, 4, 0]));
-        let complete_page_status = u32::from(PageStatus::from([STATUS_OK; 5]));
+        let incomplete_page_status = u32::from(PageStatus::from([STATUS_OK, 2, STATUS_OK, 4, 0, 0]));
+        let complete_page_status = u32::from(PageStatus::from([STATUS_OK; 6]));
         insert_test_video_with_status(&db, 1, 1, incomplete_video_status).await;
         insert_test_page_with_status(&db, 1, 1, incomplete_page_status).await;
         insert_test_page_with_status(&db, 2, 1, complete_page_status).await;
@@ -15651,8 +15723,8 @@ mod tests {
             [STATUS_OK, 0, STATUS_OK, 0, 0]
         );
         assert_eq!(
-            <[u32; 5]>::from(PageStatus::from(current_page.download_status)),
-            [STATUS_OK, 0, STATUS_OK, 0, 0]
+            <[u32; 6]>::from(PageStatus::from(current_page.download_status)),
+            [STATUS_OK, 0, STATUS_OK, 0, 0, 0]
         );
         assert_eq!(completed_page.download_status, complete_page_status);
         assert_eq!(unrelated_video.download_status, incomplete_video_status);
@@ -15665,7 +15737,7 @@ mod tests {
         insert_test_submission(&db, 1, false, false).await;
 
         let incomplete_video_status = u32::from(VideoStatus::from([STATUS_OK, 2, STATUS_OK, 4, 0]));
-        let incomplete_page_status = u32::from(PageStatus::from([STATUS_OK, 2, STATUS_OK, 4, 0]));
+        let incomplete_page_status = u32::from(PageStatus::from([STATUS_OK, 2, STATUS_OK, 4, 0, 0]));
         insert_test_video_with_status(&db, 1, 1, incomplete_video_status).await;
         insert_test_page_with_status(&db, 1, 1, incomplete_page_status).await;
 
@@ -15683,8 +15755,8 @@ mod tests {
             .expect("query should succeed")
             .expect("page should exist");
         assert_eq!(
-            <[u32; 5]>::from(PageStatus::from(current_page.download_status)),
-            [STATUS_OK, 0, STATUS_OK, 0, 0]
+            <[u32; 6]>::from(PageStatus::from(current_page.download_status)),
+            [STATUS_OK, 0, STATUS_OK, 0, 0, 0]
         );
     }
 
@@ -15717,7 +15789,7 @@ mod tests {
         );
 
         insert_test_video_with_status(&db, 1, 1, u32::from(VideoStatus::from([0; 5]))).await;
-        insert_test_page_with_status(&db, 1, 1, u32::from(PageStatus::from([0; 5]))).await;
+        insert_test_page_with_status(&db, 1, 1, u32::from(PageStatus::from([0; 6]))).await;
         mark_download_risk_control_resume(&video_source, &db)
             .await
             .expect("mark should succeed");
@@ -15755,7 +15827,7 @@ mod tests {
         let video_source = VideoSourceEnum::Submission(submission_source);
 
         insert_test_video_with_status(&db, 1, 1, u32::from(VideoStatus::from([0; 5]))).await;
-        insert_test_page_with_status(&db, 1, 1, u32::from(PageStatus::from([0; 5]))).await;
+        insert_test_page_with_status(&db, 1, 1, u32::from(PageStatus::from([0; 6]))).await;
         mark_download_risk_control_resume(&video_source, &db)
             .await
             .expect("mark should succeed");
@@ -15863,11 +15935,11 @@ mod tests {
 
         let incomplete_video_status = u32::from(VideoStatus::from([0; 5]));
         insert_test_video_with_status(&db, 1, 1, incomplete_video_status).await;
-        insert_test_page_with_status(&db, 1, 1, u32::from(PageStatus::from([0; 5]))).await;
-        insert_test_page_with_status(&db, 2, 1, u32::from(PageStatus::from([0; 5]))).await;
-        insert_test_page_with_status(&db, 3, 1, u32::from(PageStatus::from([0; 5]))).await;
+        insert_test_page_with_status(&db, 1, 1, u32::from(PageStatus::from([0; 6]))).await;
+        insert_test_page_with_status(&db, 2, 1, u32::from(PageStatus::from([0; 6]))).await;
+        insert_test_page_with_status(&db, 3, 1, u32::from(PageStatus::from([0; 6]))).await;
         insert_test_video_with_status(&db, 2, 2, incomplete_video_status).await;
-        insert_test_page_with_status(&db, 4, 2, u32::from(PageStatus::from([0; 5]))).await;
+        insert_test_page_with_status(&db, 4, 2, u32::from(PageStatus::from([0; 6]))).await;
 
         let submission_source = submission::Entity::find_by_id(1)
             .one(&db)
@@ -15969,7 +16041,6 @@ mod tests {
             false,
             false,
             &FilterOption::default(),
-            false,
             CancellationToken::new(),
         )
         .await
@@ -16568,6 +16639,7 @@ mod tests {
             Ok(ExecutionStatus::Skipped),
             Ok(ExecutionStatus::Skipped),
             Ok(ExecutionStatus::Skipped),
+            Ok(ExecutionStatus::Skipped),
         ];
 
         let err = first_inaccessible_page_error(&results).expect("应识别到 62012 不可访问错误");
@@ -16585,7 +16657,8 @@ mod tests {
             Ok(ExecutionStatus::Skipped),
             Ok(ExecutionStatus::Skipped),
             Ok(ExecutionStatus::Skipped),
-        ];
+        
+            Ok(ExecutionStatus::Skipped),];
 
         let err = first_inaccessible_page_error(&results).expect("应识别到 -404 不可访问错误");
         assert_eq!(inaccessible_reason_from_error(err), "已在B站删除/不可访问");
@@ -16708,6 +16781,7 @@ mod tests {
             audio_stream_size_bytes: Some(224),
             image: None,
             download_status: 7,
+            sponsor_cut_result: None,
             created_at: "2026-04-06 00:00:00".to_string(),
             play_video_streams: None,
             play_audio_streams: None,

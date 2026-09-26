@@ -811,6 +811,7 @@ mod tests {
             audio_stream_size_bytes: Set(Some(789)),
             image: Set(None),
             download_status: Set(completed_page_status()),
+            sponsor_cut_result: Set(None),
             created_at: Set("2026-04-15 00:00:00".to_string()),
             play_video_streams: Set(Some("[\"cached-video\"]".to_string())),
             play_audio_streams: Set(Some("[\"cached-audio\"]".to_string())),

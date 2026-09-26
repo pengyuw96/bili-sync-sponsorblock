@@ -58,3 +58,24 @@ Probes `GET {server}/api/status` (primary + mirrors). Does **not** block downloa
 ## Caveats
 
 See `/workspace/bili-sponsor-integration/AUDIT.md`.
+
+## Page acceptance: slot 6「视频剪切」
+
+`PageStatus` is now **6** slots (VideoStatus remains 5):
+
+0 视频封面 · 1 视频内容 · 2 视频信息/NFO · 3 视频弹幕 · 4 视频字幕 · **5 视频剪切 (SponsorBlock)**
+
+SponsorBlock cut no longer rides inside media download (slot 1). It is a dedicated page subtask so the UI acceptance bar shows whether a page was compared/cut. Detail API exposes `sponsor_cut_result` (English codes):
+
+| code | meaning |
+|------|---------|
+| `disabled` | `sponsor_block.enabled=false` (or audio-only / N/A) |
+| `none` | API compared, no matching skip segments |
+| `cut` | ffmpeg cut applied |
+| `skipped_chapters` | mutual exclusion with chapter split |
+| `would_remove_all` | would cut ~100%, kept original |
+| `failed_open` | error but fail_open kept original |
+| `error` | hard error (`fail_open=false`) |
+
+Migration `m20260926_000001_add_page_sponsor_cut_result` adds the column and clears completed bit31 on pages whose slot5==0 (and reopens parent videos) so existing libraries re-run only the new cut slot. Cite: [BilibiliSponsorBlock](https://github.com/hanydd/BilibiliSponsorBlock).
+

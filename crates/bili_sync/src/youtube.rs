@@ -1815,6 +1815,16 @@ fn youtube_page_status(video: &youtube_video::Model) -> PageStatus {
     PageStatus::from(video.page_task_status)
 }
 
+/// External page tasks stay at 5 meaningful slots; slot 5 (SponsorBlock cut) is N/A → always OK.
+fn ensure_youtube_page_status(video: &youtube_video::Model) -> PageStatus {
+    let mut status = PageStatus::from(video.page_task_status);
+    if status.get(crate::utils::status::PAGE_STATUS_SPONSOR_CUT_INDEX) < STATUS_OK {
+        status.set(crate::utils::status::PAGE_STATUS_SPONSOR_CUT_INDEX, STATUS_OK);
+    }
+    status
+}
+
+
 /// 由状态位派生出整条视频的文本状态（兼容既有扫描/筛选/队列逻辑）。
 /// skipped 等特殊文本由调用方在写完状态位后单独保留。
 fn youtube_text_from_task_status(video_task_status: u32, page_task_status: u32) -> String {
@@ -1849,11 +1859,20 @@ fn youtube_all_tasks_ok_bits() -> u32 {
     status.into()
 }
 
+fn youtube_all_page_tasks_ok_bits() -> u32 {
+    let mut status = PageStatus::default();
+    for index in 0..6 {
+        status.set(index, STATUS_OK);
+    }
+    status.into()
+}
+
+
 /// 外源视频任务状态直接从数据库状态位读取（与 B 站一致），不再由磁盘文件反推。
 /// 已完成视频即使媒体文件被移走/清理，任务位仍是完成，卡片不会退回“未下载”。
-async fn youtube_artifact_status(video: &youtube_video::Model, source: &youtube_source::Model) -> ([u32; 5], [u32; 5]) {
+async fn youtube_artifact_status(video: &youtube_video::Model, source: &youtube_source::Model) -> ([u32; 5], [u32; 6]) {
     let _ = source;
-    (youtube_video_status(video).into(), youtube_page_status(video).into())
+    (youtube_video_status(video).into(), ensure_youtube_page_status(video).into())
 }
 
 async fn unified_youtube_parts(
@@ -1927,6 +1946,7 @@ async fn unified_youtube_parts(
                     pid: 1,
                     name: video.title.clone(),
                     download_status: page_status,
+                    sponsor_cut_result: None,
                     path: output_path,
                     danmaku_last_synced_at: None,
                     danmaku_sync_generation: 0,
@@ -1946,6 +1966,7 @@ async fn unified_youtube_parts(
                             video.title.clone()
                         },
                         download_status: page_status,
+                        sponsor_cut_result: None,
                         path: Some(path.display().to_string()),
                         danmaku_last_synced_at: None,
                         danmaku_sync_generation: 0,
@@ -3400,6 +3421,8 @@ async fn run_youtube_sidecar_tasks(db: &DatabaseConnection, video: youtube_video
         if video_status.get(index) < STATUS_OK {
             video_status.set(index, STATUS_OK);
         }
+    }
+    for index in 0..6 {
         if page_status.get(index) < STATUS_OK {
             page_status.set(index, STATUS_OK);
         }
@@ -3460,7 +3483,7 @@ async fn download_video(
     // 需要重跑时，只重建附属文件，绝不重新下载媒体 —— 媒体被移走的已完成视频
     // 也不会被重新拉回下载队列。
     let video_status = VideoStatus::from(video.video_task_status);
-    let page_status = PageStatus::from(video.page_task_status);
+    let page_status = ensure_youtube_page_status(&video);
     let video_run = video_status.should_run();
     let page_run = page_status.should_run();
     let media_pending = video_run[4] || page_run[1];
@@ -3504,7 +3527,7 @@ async fn download_video(
                     // 占位文件并把下载状态记为已完成（UI 显示充电视频徽标而非失败）。
                     let mut paid: youtube_video::ActiveModel = video.clone().into();
                     paid.video_task_status = Set(youtube_all_tasks_ok_bits());
-                    paid.page_task_status = Set(youtube_all_tasks_ok_bits());
+                    paid.page_task_status = Set(youtube_all_page_tasks_ok_bits());
                     paid.download_status = Set("completed".to_string());
                     paid.retry_count = Set(0);
                     paid.is_charge_video = Set(true);
@@ -3532,7 +3555,7 @@ async fn download_video(
                     // 不进入 failed，也不保留不存在的输出路径。
                     let mut skipped: youtube_video::ActiveModel = video.clone().into();
                     skipped.video_task_status = Set(youtube_all_tasks_ok_bits());
-                    skipped.page_task_status = Set(youtube_all_tasks_ok_bits());
+                    skipped.page_task_status = Set(youtube_all_page_tasks_ok_bits());
                     skipped.download_status = Set("skipped".to_string());
                     skipped.retry_count = Set(0);
                     skipped.output_path = Set(None);
@@ -3579,7 +3602,7 @@ async fn download_video(
                     }
                 }
                 active.video_task_status = Set(youtube_all_tasks_ok_bits());
-                active.page_task_status = Set(youtube_all_tasks_ok_bits());
+                active.page_task_status = Set(youtube_all_page_tasks_ok_bits());
                 active.download_status = Set("completed".to_string());
                 active.retry_count = Set(0);
                 active.output_path = Set(Some(downloaded.output_path.display().to_string()));
@@ -7924,7 +7947,7 @@ mod tests {
         let source = sample_external_source("douyin");
         let (video_status, page_status) = super::youtube_artifact_status(&video, &source).await;
         assert_eq!(video_status, [7, 7, 7, 7, 7], "已完成的视频文件被移走后应保持全部完成");
-        assert_eq!(page_status, [7, 7, 7, 7, 7], "分页状态同样应保持全部完成");
+        assert_eq!(page_status, [7, 7, 7, 7, 7, 7], "分页状态同样应保持全部完成");
     }
 
     #[test]
@@ -8257,7 +8280,7 @@ mod tests {
         let source = sample_external_source("douyin");
         let (video_status, page_status) = super::youtube_artifact_status(&video, &source).await;
         assert_eq!(video_status, [7, 7, 7, 7, 7], "已完成视频文件被移走后应保持全部完成");
-        assert_eq!(page_status, [7, 7, 7, 7, 7], "分页状态同样应保持全部完成");
+        assert_eq!(page_status, [7, 7, 7, 7, 7, 7], "分页状态同样应保持全部完成");
 
         // 只重置“视频信息”(视频1/分页2) → 仅该任务回到未开始，媒体(视频4)仍完成。
         let mut video = video;

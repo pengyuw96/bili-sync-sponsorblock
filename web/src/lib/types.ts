@@ -361,7 +361,8 @@ export interface PageInfo {
 	id: number;
 	pid: number;
 	name: string;
-	download_status: [number, number, number, number, number];
+	download_status: number[]; // B站 6 槽；外源仍为 5
+	sponsor_cut_result?: string | null;
 	path?: string;
 	danmaku_last_synced_at?: string;
 	danmaku_sync_generation: number;

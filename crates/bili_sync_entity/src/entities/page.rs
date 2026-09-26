@@ -20,6 +20,8 @@ pub struct Model {
     pub audio_stream_size_bytes: Option<i64>,
     pub image: Option<String>,
     pub download_status: u32,
+    /// SponsorBlock cut outcome code (disabled/none/cut/...) for UI
+    pub sponsor_cut_result: Option<String>,
     pub created_at: String,
     pub play_video_streams: Option<String>,
     pub play_audio_streams: Option<String>,

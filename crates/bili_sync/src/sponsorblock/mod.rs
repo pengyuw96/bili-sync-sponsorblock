@@ -206,3 +206,17 @@ pub enum SponsorCutOutcome {
         removed_approx_secs: f64,
     },
 }
+
+impl SponsorCutOutcome {
+    /// Short English code persisted on `page.sponsor_cut_result` for the UI.
+    pub fn result_code(&self) -> &'static str {
+        match self {
+            Self::Disabled => "disabled",
+            Self::SkippedForChapters => "skipped_chapters",
+            Self::Noop => "none",
+            Self::WouldRemoveAll => "would_remove_all",
+            Self::FailedOpen => "failed_open",
+            Self::Cut { .. } => "cut",
+        }
+    }
+}

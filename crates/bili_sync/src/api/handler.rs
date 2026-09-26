@@ -1168,6 +1168,7 @@ mod rename_tests {
             audio_stream_size_bytes: Set(None),
             image: Set(None),
             download_status: Set(31),
+            sponsor_cut_result: Set(None),
             created_at: Set("2026-05-30 12:00:00".to_string()),
             play_video_streams: Set(None),
             play_audio_streams: Set(None),
@@ -1499,6 +1500,7 @@ mod reset_path_tests {
             audio_stream_size_bytes: None,
             image: None,
             download_status: 31,
+            sponsor_cut_result: None,
             created_at: "2026-04-20 00:00:00".to_string(),
             play_video_streams: None,
             play_audio_streams: None,
@@ -1992,6 +1994,7 @@ mod queue_sse_tests {
             audio_stream_size_bytes: Set(None),
             image: Set(None),
             download_status: Set(0),
+            sponsor_cut_result: Set(None),
             created_at: Set("2026-03-28 00:00:00".to_string()),
             play_video_streams: Set(None),
             play_audio_streams: Set(None),
@@ -2073,7 +2076,7 @@ mod queue_sse_tests {
     }
 
     async fn insert_retry_charge_test_page(db: &DatabaseConnection, id: i32, video_id: i32) {
-        let completed_status: u32 = PageStatus::from([STATUS_OK; 5]).into();
+        let completed_status: u32 = PageStatus::from([STATUS_OK; 6]).into();
 
         page::ActiveModel {
             id: Set(id),
@@ -2090,6 +2093,7 @@ mod queue_sse_tests {
             audio_stream_size_bytes: Set(None),
             image: Set(None),
             download_status: Set(completed_status),
+            sponsor_cut_result: Set(None),
             created_at: Set("2026-03-28 00:00:00".to_string()),
             play_video_streams: Set(None),
             play_audio_streams: Set(None),
@@ -3987,6 +3991,7 @@ pub async fn get_video(
             page::Column::Pid,
             page::Column::Name,
             page::Column::DownloadStatus,
+            page::Column::SponsorCutResult,
             page::Column::Path,
             page::Column::DanmakuLastSyncedAt,
             page::Column::DanmakuSyncGeneration,
@@ -3998,6 +4003,7 @@ pub async fn get_video(
             i32,
             String,
             u32,
+            Option<String>,
             Option<String>,
             Option<String>,
             u32,
@@ -5111,7 +5117,7 @@ pub async fn update_video_status(
         if let Some(page_info) = page_id_map.remove(&page_update.page_id) {
             let mut page_status = PageStatus::from(page_info.download_status);
             for update in &page_update.updates {
-                if update.status_index < 5 {
+                if update.status_index < 6 {
                     page_status.set(update.status_index, update.status_value);
                 }
             }
@@ -9933,6 +9939,7 @@ async fn validate_path_reset_safety(
                 audio_stream_size_bytes: None,
                 image: None,
                 download_status: 0,
+            sponsor_cut_result: None,
                 created_at: now_standard_string(),
                 play_video_streams: None,
                 play_audio_streams: None,
@@ -19693,6 +19700,7 @@ async fn update_bangumi_video_path_in_database(
             audio_stream_size_bytes: None,
             image: None,
             download_status: 0,
+            sponsor_cut_result: None,
             created_at: now_standard_string(),
             play_video_streams: None,
             play_audio_streams: None,
@@ -19851,6 +19859,7 @@ async fn move_bangumi_files_to_new_path(
             audio_stream_size_bytes: None,
             image: None,
             download_status: 0,
+            sponsor_cut_result: None,
             created_at: now_standard_string(),
             play_video_streams: None,
             play_audio_streams: None,
