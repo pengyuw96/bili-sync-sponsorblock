@@ -157,10 +157,19 @@ cd bili-sync-up
 - [bilibili-api](https://github.com/Nemo2011/bilibili-api) - Python 接口实现参考
 - [danmu2ass](https://github.com/gwy15/danmu2ass) - 弹幕下载功能
 
-## Local extension note (audit package)
+## SponsorBlock extension (this fork)
 
-This tree may include a **local** BilibiliSponsorBlock-style sponsor cutting feature (`sponsor_block` config).
-It is **not** an upstream release claim. See `NOTES.md` / the audit package docs.
+This repository is a **community fork** of [NeeYoonc/bili-sync-up](https://github.com/NeeYoonc/bili-sync-up) **v3.1.2**, not an official upstream release.
+
+Local version string: `3.1.2+sponsorblock-mark`.
+
+Features (Bilibili only):
+- **Cut**: remove selected SponsorBlock categories with ffmpeg (fail-open).
+- **Mark**: embed Matroska/MP4 chapters for Emby / Jellyfin / Plex **manual** timeline skip.
+- Settings UI: separate checkboxes for cut vs mark categories (cut wins on overlap).
+- Heartbeat: `GET /api/sponsorblock/health`.
+
+See `NOTES.md` for config and result codes.
 
 Attribution:
 - Base: https://github.com/NeeYoonc/bili-sync-up (v3.1.2)
