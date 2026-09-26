@@ -1,6 +1,6 @@
 //! Cut keep-ranges from a media file via ffmpeg stream-copy + concat.
 //!
-//! Base merge/split patterns from bili-sync-up v3.1.0 downloader;
+//! Base merge/split patterns from bili-sync-up v3.1.2 downloader;
 //! segment semantics from BilibiliSponsorBlock.
 
 use std::path::{Path, PathBuf};

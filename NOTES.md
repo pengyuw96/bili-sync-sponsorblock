@@ -1,7 +1,7 @@
-# Local notes — 3.1.0+sponsorblock (audit package)
+# Local notes — 3.1.2+sponsorblock (audit package)
 
-**Version string for this audit package:** `3.1.0+sponsorblock`  
-Upstream tag remains **v3.1.0** (`8019f983cd5978eab89ae25cabdbd46c4bbe35b8`).  
+**Version string for this audit package:** `3.1.2+sponsorblock`  
+Upstream tag remains **v3.1.2** (`854d3e3b3392741f22bf2601aec8c78cfc75a6e1`).  
 This is a **local** modification for user audit. It is **not** an official upstream release.
 
 ## Feature
@@ -51,7 +51,7 @@ Probes `GET {server}/api/status` (primary + mirrors). Does **not** block downloa
 
 ## Attribution
 
-- Base project: https://github.com/NeeYoonc/bili-sync-up (v3.1.0)
+- Base project: https://github.com/NeeYoonc/bili-sync-up (v3.1.2)
 - API / segment semantics: https://github.com/hanydd/BilibiliSponsorBlock
 - API wiki: https://github.com/hanydd/BilibiliSponsorBlock/wiki/API
 
