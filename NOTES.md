@@ -1,8 +1,8 @@
-# Local notes — 3.1.2+sponsorblock-mark (audit package)
+# Notes — 3.1.2+sponsorblock-mark
 
 **Version string for this audit package:** `3.1.2+sponsorblock-mark`  
 Upstream tag remains **v3.1.2** (`854d3e3b3392741f22bf2601aec8c78cfc75a6e1`).  
-This is a **local** modification for user audit. It is **not** an official upstream release.
+This is a **community fork** modification. It is **not** an official upstream release.
 
 ## Feature
 
