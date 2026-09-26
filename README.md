@@ -163,7 +163,7 @@ This tree may include a **local** BilibiliSponsorBlock-style sponsor cutting fea
 It is **not** an upstream release claim. See `NOTES.md` / the audit package docs.
 
 Attribution:
-- Base: https://github.com/NeeYoonc/bili-sync-up (v3.1.0)
+- Base: https://github.com/NeeYoonc/bili-sync-up (v3.1.2)
 - Segment API / semantics: https://github.com/hanydd/BilibiliSponsorBlock
 - API wiki: https://github.com/hanydd/BilibiliSponsorBlock/wiki/API
 

@@ -16,7 +16,7 @@ use crate::config::SponsorBlockConfig;
 pub const ORIGIN: &str = "bili-sync-up";
 
 /// Local audit build tag; not an upstream release claim.
-pub const CLIENT_VERSION: &str = "3.1.0+sponsorblock";
+pub const CLIENT_VERSION: &str = "3.1.2+sponsorblock";
 
 pub struct SponsorBlockClient {
     http: reqwest::Client,
@@ -29,7 +29,7 @@ impl SponsorBlockClient {
         headers.insert("origin", HeaderValue::from_static(ORIGIN));
         headers.insert(
             "x-ext-version",
-            HeaderValue::from_str(CLIENT_VERSION).unwrap_or_else(|_| HeaderValue::from_static("3.1.0")),
+            HeaderValue::from_str(CLIENT_VERSION).unwrap_or_else(|_| HeaderValue::from_static("3.1.2")),
         );
         let http = reqwest::Client::builder()
             .timeout(timeout)
