@@ -176,6 +176,27 @@
 		);
 	}
 
+	
+	function sponsorCutResultLabel(code?: string | null): string {
+		switch (code) {
+			case 'cut':
+				return '已剪切';
+			case 'none':
+				return '已对比，无片段';
+			case 'disabled':
+				return '未启用';
+			case 'skipped_chapters':
+				return '章节分割跳过';
+			case 'would_remove_all':
+				return '片段过多已保留原片';
+			case 'failed_open':
+			case 'error':
+				return '剪切失败（保留原片）';
+			default:
+				return code ? `剪切：${code}` : '';
+		}
+	}
+
 	function getDanmakuStageLabel(generation: number) {
 		return DANMAKU_SYNC_STAGE_LABELS[generation] ?? '未知阶段';
 	}
@@ -982,7 +1003,7 @@
 									customSubtitle=""
 									taskNames={isExternal
 										? ['视频封面', '视频内容', '视频 NFO', isDouyin || isTikTok ? '作品信息' : '直播聊天', '视频字幕']
-										: ['视频封面', '视频内容', '视频信息', '视频弹幕', '视频字幕']}
+										: ['视频封面', '视频内容', '视频信息', '视频弹幕', '视频字幕', '视频剪切']}
 									showProgress={true}
 								/>
 
@@ -1136,6 +1157,11 @@
 								<div class="flex items-center gap-2">
 									{#if getEmbeddedPlayerUrl() && !imageViewMode}
 										<Button size="sm" variant="ghost" onclick={togglePlayMode}>
+								{#if !isExternal && pageInfo.sponsor_cut_result}
+									<p class="text-muted-foreground px-1 text-xs">
+										{sponsorCutResultLabel(pageInfo.sponsor_cut_result)}
+									</p>
+								{/if}
 											{onlinePlayMode ? '切换到本地' : `切换到${platformLabel}内嵌`}
 										</Button>
 									{/if}

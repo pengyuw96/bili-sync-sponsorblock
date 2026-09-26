@@ -28,7 +28,9 @@
 		return ['视频封面', '视频信息', 'UP主头像', 'UP主信息', '分P下载'];
 	})();
 
-	const pageTaskNames = ['视频封面', '视频内容', '视频信息', '视频弹幕', '视频字幕'];
+	$: pageTaskNames = isExternal
+		? ['视频封面', '视频内容', '视频信息', '视频弹幕', '视频字幕']
+		: ['视频封面', '视频内容', '视频信息', '视频弹幕', '视频字幕', '视频剪切'];
 
 	let videoStatuses: number[] = [];
 	let pageStatuses: Record<number, number[]> = {};

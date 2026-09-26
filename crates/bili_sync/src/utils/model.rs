@@ -1272,7 +1272,8 @@ pub async fn create_pages(
         );
         let update_page = page::ActiveModel {
             id: Unchanged(original_page.id),
-            download_status: Set(0), // 重置下载状态
+            download_status: Set(0),
+            sponsor_cut_result: Set(None), // 重置下载状态
             path: Set(None),         // 清空路径
             file_size_bytes: Set(None),
             video_stream_size_bytes: Set(None),
@@ -1958,6 +1959,7 @@ mod tests {
             audio_stream_size_bytes: Set(None),
             image: Set(None),
             download_status: Set(0),
+            sponsor_cut_result: Set(None),
             created_at: Set("2026-03-30 00:00:00".to_string()),
             play_video_streams: Set(None),
             play_audio_streams: Set(None),
@@ -2090,6 +2092,7 @@ mod tests {
                 duration: Set(60),
                 image: Set(None),
                 download_status: Set(3),
+                sponsor_cut_result: Set(None),
                 path: Set(Some(format!("/tmp/fav/video/P{i}.mp4"))),
                 file_size_bytes: Set(Some(100)),
                 video_stream_size_bytes: Set(None),

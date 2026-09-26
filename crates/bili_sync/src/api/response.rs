@@ -296,7 +296,9 @@ pub struct PageInfo {
     pub id: i32,
     pub pid: i32,
     pub name: String,
-    pub download_status: [u32; 5],
+    pub download_status: [u32; 6],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sponsor_cut_result: Option<String>,
     pub path: Option<String>,
     pub danmaku_last_synced_at: Option<String>,
     pub danmaku_sync_generation: u32,
@@ -352,11 +354,12 @@ impl
             u32,
         ),
     ) -> Self {
-        Self {
+                Self {
             id,
             pid,
             name,
             download_status: PageStatus::from(download_status).into(),
+            sponsor_cut_result: None,
             path,
             danmaku_last_synced_at,
             danmaku_sync_generation,
@@ -365,6 +368,61 @@ impl
         }
     }
 }
+
+impl
+    From<(
+        i32,
+        i32,
+        String,
+        u32,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        u32,
+        Option<i64>,
+        u32,
+    )> for PageInfo
+{
+    fn from(
+        (
+            id,
+            pid,
+            name,
+            download_status,
+            sponsor_cut_result,
+            path,
+            danmaku_last_synced_at,
+            danmaku_sync_generation,
+            danmaku_cid_snapshot,
+            danmaku_last_write_count,
+        ): (
+            i32,
+            i32,
+            String,
+            u32,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            u32,
+            Option<i64>,
+            u32,
+        ),
+    ) -> Self {
+        Self {
+            id,
+            pid,
+            name,
+            download_status: PageStatus::from(download_status).into(),
+            sponsor_cut_result,
+            path,
+            danmaku_last_synced_at,
+            danmaku_sync_generation,
+            danmaku_cid_snapshot,
+            danmaku_last_write_count,
+        }
+    }
+}
+
 
 #[derive(Serialize, ToSchema)]
 pub struct VideoInfo {
