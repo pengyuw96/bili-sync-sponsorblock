@@ -1,16 +1,16 @@
 # bili-sync-sponsorblock
 
 <p align="center">
-  <strong>基于 <a href="https://github.com/NeeYoonc/bili-sync-up">NeeYoonc/bili-sync-up</a> v3.1.2 的社区 Fork</strong><br/>
+  <strong>基于 <a href="https://github.com/NeeYoonc/bili-sync-up">NeeYoonc/bili-sync-up</a> v3.1.3 的社区 Fork</strong><br/>
   集成 <a href="https://github.com/hanydd/BilibiliSponsorBlock">BilibiliSponsorBlock</a> 分段：可<strong>裁剪</strong>或写入<strong>章节标记</strong>（Emby / Jellyfin / Plex 时间轴手动跳过）
 </p>
 
 <p align="center">
   <a href="https://github.com/pengyuw96/bili-sync-sponsorblock/releases"><img src="https://img.shields.io/github/v/release/pengyuw96/bili-sync-sponsorblock?style=flat-square&label=release" alt="Release"/></a>
   <a href="https://github.com/NeeYoonc/bili-sync-up"><img src="https://img.shields.io/badge/forked%20from-NeeYoonc%2Fbili--sync--up-blue?style=flat-square" alt="Forked from"/></a>
-  <a href="https://github.com/NeeYoonc/bili-sync-up/releases/tag/v3.1.2"><img src="https://img.shields.io/badge/upstream-v3.1.2-informational?style=flat-square" alt="Upstream"/></a>
+  <a href="https://github.com/NeeYoonc/bili-sync-up/releases/tag/v3.1.3"><img src="https://img.shields.io/badge/upstream-v3.1.3-informational?style=flat-square" alt="Upstream"/></a>
   <a href="https://github.com/hanydd/BilibiliSponsorBlock"><img src="https://img.shields.io/badge/segments-BilibiliSponsorBlock-orange?style=flat-square" alt="SponsorBlock"/></a>
-  <img src="https://img.shields.io/badge/local%20version-3.1.2%2Bsponsorblock--mark-success?style=flat-square" alt="Local version"/>
+  <img src="https://img.shields.io/badge/local%20version-3.1.3%2Bsponsorblock--mark-success?style=flat-square" alt="Local version"/>
 </p>
 
 > [!IMPORTANT]
@@ -22,7 +22,7 @@
 
 | 角色 | 仓库 / 文档 | 说明 |
 |------|-------------|------|
-| **Fork 自** | [NeeYoonc/bili-sync-up](https://github.com/NeeYoonc/bili-sync-up) | 基线版本 **v3.1.2**（commit `854d3e3b`） |
+| **Fork 自** | [NeeYoonc/bili-sync-up](https://github.com/NeeYoonc/bili-sync-up) | 基线版本 **v3.1.3**（commit `f5a91a97`，2026-10-03） |
 | **分段数据** | [hanydd/BilibiliSponsorBlock](https://github.com/hanydd/BilibiliSponsorBlock) | 社区标注的跳过片段 |
 | **API 说明** | [BilibiliSponsorBlock Wiki · API](https://github.com/hanydd/BilibiliSponsorBlock/wiki/API) | `skipSegments` 等接口语义 |
 | **上游文档** | [NeeYoonc.github.io/bili-sync-up](https://NeeYoonc.github.io/bili-sync-up/) | 安装、配置、迁移等通用说明 |
@@ -33,7 +33,7 @@
 
 ## 本 Fork 新增功能
 
-相对上游 **v3.1.2**，本仓库额外加入：
+相对上游 **v3.1.3**，本仓库额外加入：
 
 ### 1. SponsorBlock 裁剪（Cut）
 
@@ -75,7 +75,7 @@
 
 ## 快速开始
 
-上游通用安装方式仍适用，见 [上游文档](https://NeeYoonc.github.io/bili-sync-up/) 与原版 Docker 说明。使用本 Fork 时请构建 / 导入本仓库对应镜像（例如本地标签 `bili-sync-sponsorblock:3.1.2-mark`），不要与官方镜像混淆。
+上游通用安装方式仍适用，见 [上游文档](https://NeeYoonc.github.io/bili-sync-up/) 与原版 Docker 说明。使用本 Fork 时请构建 / 导入本仓库对应镜像（例如本地标签 `bili-sync-sponsorblock:3.1.3-mark`），不要与官方镜像混淆。
 
 ```bash
 git clone https://github.com/pengyuw96/bili-sync-sponsorblock.git
@@ -91,9 +91,9 @@ cd bili-sync-sponsorblock
 
 | 项目 | 值 |
 |------|-----|
-| 本 Fork 版本字符串 | `3.1.2+sponsorblock-mark` |
-| 上游基线 | [v3.1.2](https://github.com/NeeYoonc/bili-sync-up/releases/tag/v3.1.2) |
-| Release 标签 | [v3.1.2-sponsorblock-mark](https://github.com/pengyuw96/bili-sync-sponsorblock/releases/tag/v3.1.2-sponsorblock-mark) |
+| 本 Fork 版本字符串 | `3.1.3+sponsorblock-mark` |
+| 上游基线 | [v3.1.3](https://github.com/NeeYoonc/bili-sync-up/releases/tag/v3.1.3)（`f5a91a97`） |
+| 已发布 Release | [v3.1.2-sponsorblock-mark](https://github.com/pengyuw96/bili-sync-sponsorblock/releases/tag/v3.1.2-sponsorblock-mark)（上一版；本分支 `feature/sponsorblock-on-v3.1.3` 尚未发布） |
 
 ---
 

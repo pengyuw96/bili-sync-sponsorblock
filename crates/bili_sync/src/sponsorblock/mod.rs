@@ -1,6 +1,6 @@
 //! BilibiliSponsorBlock-style sponsor cutting + chapter marking for Bilibili page downloads.
 //!
-//! Base: https://github.com/NeeYoonc/bili-sync-up (v3.1.2)
+//! Base: https://github.com/NeeYoonc/bili-sync-up (v3.1.3)
 //! API / segment semantics: https://github.com/hanydd/BilibiliSponsorBlock
 //! Wiki: https://github.com/hanydd/BilibiliSponsorBlock/wiki/API
 //!

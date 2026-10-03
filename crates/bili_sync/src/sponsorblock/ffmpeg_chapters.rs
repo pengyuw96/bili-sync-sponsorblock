@@ -1,7 +1,7 @@
 //! Embed Matroska/MP4 chapters via ffmpeg ffmetadata + stream-copy remux.
 //!
 //! For Emby/Jellyfin timeline markers (manual skip), not auto-seek.
-//! Base: https://github.com/NeeYoonc/bili-sync-up (v3.1.2)
+//! Base: https://github.com/NeeYoonc/bili-sync-up (v3.1.3)
 //! Segment semantics: https://github.com/hanydd/BilibiliSponsorBlock
 //!
 //! MP4/QuickTime chapters must be contiguous; we fill gaps with 「内容」 chapters

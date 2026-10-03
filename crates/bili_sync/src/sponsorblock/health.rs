@@ -3,7 +3,7 @@
 //! Probes `GET {server}/api/status` (BilibiliSponsorBlock status API).
 //! Spec: https://github.com/hanydd/BilibiliSponsorBlock/wiki/API
 //! Upstream: https://github.com/hanydd/BilibiliSponsorBlock
-//! Base project: https://github.com/NeeYoonc/bili-sync-up (v3.1.2)
+//! Base project: https://github.com/NeeYoonc/bili-sync-up (v3.1.3)
 //!
 //! Heartbeats are observational only — downloads already fail-open and are
 //! never blocked on a failed health check.
@@ -95,7 +95,7 @@ fn build_http_client(timeout_ms: u64) -> Result<reqwest::Client, String> {
     headers.insert(
         "x-ext-version",
         reqwest::header::HeaderValue::from_str(CLIENT_VERSION)
-            .unwrap_or_else(|_| reqwest::header::HeaderValue::from_static("3.1.2")),
+            .unwrap_or_else(|_| reqwest::header::HeaderValue::from_static("3.1.3")),
     );
     reqwest::Client::builder()
         .timeout(Duration::from_millis(timeout_ms.max(1000)))

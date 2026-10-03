@@ -1,7 +1,7 @@
-# Notes — 3.1.2+sponsorblock-mark
+# Notes — 3.1.3+sponsorblock-mark
 
-**Version string for this audit package:** `3.1.2+sponsorblock-mark`  
-Upstream tag remains **v3.1.2** (`854d3e3b3392741f22bf2601aec8c78cfc75a6e1`).  
+**Version string for this audit package:** `3.1.3+sponsorblock-mark`  
+Upstream tag is **v3.1.3** (`f5a91a975ca311a065864a613860bb61d963c090`, published 2026-10-03). Rebased from the v3.1.2 SponsorBlock fork; previous published tag remains `v3.1.2-sponsorblock-mark`.  
 This is a **community fork** modification. It is **not** an official upstream release.
 
 ## Feature
@@ -52,7 +52,7 @@ Probes `GET {server}/api/status` (primary + mirrors). Does **not** block downloa
 
 ## Attribution
 
-- Base project: https://github.com/NeeYoonc/bili-sync-up (v3.1.2)
+- Base project: https://github.com/NeeYoonc/bili-sync-up (v3.1.3)
 - API / segment semantics: https://github.com/hanydd/BilibiliSponsorBlock
 - API wiki: https://github.com/hanydd/BilibiliSponsorBlock/wiki/API
 
