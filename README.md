@@ -91,7 +91,7 @@ cd bili-sync-sponsorblock
 
 | 项目 | 值 |
 |------|-----|
-| 本 Fork 版本字符串 | `3.1.4.1` |
+| 本 Fork 版本字符串 | 界面 `v3.1.4.1`；Cargo 包版本 `3.1.4`（Cargo 不接受四段版本号） |
 | 上游基线 | [v3.1.3](https://github.com/NeeYoonc/bili-sync-up/releases/tag/v3.1.3)（`f5a91a97`）。上游最新发布号是 [v3.1.4.1](https://github.com/NeeYoonc/bili-sync-up/releases/tag/v3.1.4.1)，本仓库尚未并入该版本的漫画源等改动。 |
 | 已发布 Release | [v3.1.2-sponsorblock-mark](https://github.com/pengyuw96/bili-sync-sponsorblock/releases/tag/v3.1.2-sponsorblock-mark) |
 

@@ -1,7 +1,7 @@
 # Notes — 3.1.4.1
 
-**Version string for this fork:** `3.1.4.1`  
-Upstream code baseline is still **v3.1.3** (`f5a91a975ca311a065864a613860bb61d963c090`, published 2026-10-03). The displayed version matches the latest upstream release number; upstream v3.1.4 / v3.1.4.1 (manga source and the duplicate-source patch) are not merged. Previous published tag remains `v3.1.2-sponsorblock-mark`.  
+**Version string shown in the web UI:** `v3.1.4.1`  
+Cargo package version is `3.1.4` because Cargo rejects a fourth numeric component. Upstream code baseline is still **v3.1.3** (`f5a91a975ca311a065864a613860bb61d963c090`, published 2026-10-03). Upstream v3.1.4 / v3.1.4.1 (manga source and the duplicate-source patch) are not merged. Previous published tag remains `v3.1.2-sponsorblock-mark`.  
 This is a **community fork** modification. It is **not** an official upstream release.
 
 ## Feature
