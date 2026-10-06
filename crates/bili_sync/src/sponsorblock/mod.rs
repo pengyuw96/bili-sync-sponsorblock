@@ -15,6 +15,7 @@ mod ffmpeg_chapters;
 mod ffmpeg_cut;
 pub mod health;
 mod model;
+pub mod sidecars;
 pub mod timeline;
 
 use std::collections::HashSet;
@@ -30,9 +31,7 @@ use self::ffmpeg_chapters::{
     category_chapter_title, embed_chapters_in_place, ChapterMark,
 };
 use self::ffmpeg_cut::{atomic_replace_with_optional_backup, cut_out_segments_with_ffmpeg};
-use self::timeline::{
-    compute_keep_ranges, duration_after_removes, merge_remove_intervals, remap_mark_interval,
-};
+use self::timeline::{compute_keep_ranges, duration_after_removes, remap_mark_interval, removes_from_keeps};
 
 /// Orchestrate fetch → cut → mark for one Bilibili page media file.
 ///
@@ -40,6 +39,8 @@ use self::timeline::{
 /// the media file in place (uncut / unmarked as applicable).
 pub async fn maybe_cut_sponsor_segments(
     page_path: &Path,
+    danmaku_path: &Path,
+    subtitle_stem: &Path,
     bvid: &str,
     cid: i64,
     duration_secs: u32,
@@ -180,8 +181,10 @@ pub async fn maybe_cut_sponsor_segments(
                 );
             }
             Some(keep) => {
-                let merged_removes = merge_remove_intervals(&remove_intervals, 1e-3);
-                removed_approx_secs = merged_removes.iter().map(|(s, e)| e - s).sum();
+                // Use the complement of the ranges ffmpeg will keep. Short gaps that
+                // compute_keep_ranges absorbed are part of the real cut.
+                let cut_removes = removes_from_keeps(&keep, duration);
+                removed_approx_secs = cut_removes.iter().map(|(s, e)| (e - s).max(0.0)).sum();
                 info!(
                     "SponsorBlock: cutting {} cid={} — ~{:.1}s remove, {} keep parts → {}",
                     bvid,
@@ -215,7 +218,7 @@ pub async fn maybe_cut_sponsor_segments(
                             Ok(()) => {
                                 did_cut = true;
                                 keep_parts = keep.len();
-                                applied_removes = merged_removes;
+                                applied_removes = cut_removes;
                             }
                             Err(e) => {
                                 let _ = tokio::fs::remove_file(&tmp_out).await;
@@ -302,6 +305,29 @@ pub async fn maybe_cut_sponsor_segments(
                     return Err(e.context("SponsorBlock chapter mark"));
                 }
             }
+        }
+    }
+
+    // Sidecar failure must not fail the page: a retry could cut the media twice.
+    if did_cut || did_mark {
+        let plan_removes: &[(f64, f64)] = if did_cut { &applied_removes } else { &[] };
+        let plan_marks: Vec<(f64, f64, String)> = mark_raw
+            .iter()
+            .map(|(start, end, cat)| (*start, *end, category_chapter_title(cat).to_string()))
+            .collect();
+        if let Err(err) = sidecars::save_and_apply(
+            page_path,
+            danmaku_path,
+            subtitle_stem,
+            plan_removes,
+            &plan_marks,
+        )
+        .await
+        {
+            warn!(
+                "SponsorBlock sidecar rewrite failed (media kept, page still succeeds): {:#}",
+                err
+            );
         }
     }
 

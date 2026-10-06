@@ -10,7 +10,7 @@
   <a href="https://github.com/NeeYoonc/bili-sync-up"><img src="https://img.shields.io/badge/forked%20from-NeeYoonc%2Fbili--sync--up-blue?style=flat-square" alt="Forked from"/></a>
   <a href="https://github.com/NeeYoonc/bili-sync-up/releases/tag/v3.1.3"><img src="https://img.shields.io/badge/upstream-v3.1.3-informational?style=flat-square" alt="Upstream"/></a>
   <a href="https://github.com/hanydd/BilibiliSponsorBlock"><img src="https://img.shields.io/badge/segments-BilibiliSponsorBlock-orange?style=flat-square" alt="SponsorBlock"/></a>
-  <img src="https://img.shields.io/badge/local%20version-3.1.3%2Bsponsorblock--mark-success?style=flat-square" alt="Local version"/>
+  <img src="https://img.shields.io/badge/local%20version-3.1.4.1-success?style=flat-square" alt="Local version"/>
 </p>
 
 > [!IMPORTANT]
@@ -75,7 +75,7 @@
 
 ## 快速开始
 
-上游通用安装方式仍适用，见 [上游文档](https://NeeYoonc.github.io/bili-sync-up/) 与原版 Docker 说明。使用本 Fork 时请构建 / 导入本仓库对应镜像（例如本地标签 `bili-sync-sponsorblock:3.1.3-mark`），不要与官方镜像混淆。
+上游通用安装方式仍适用，见 [上游文档](https://NeeYoonc.github.io/bili-sync-up/) 与原版 Docker 说明。使用本 Fork 时请构建 / 导入本仓库对应镜像（例如本地标签 `bili-sync-sponsorblock:3.1.4.1`），不要与官方镜像混淆。
 
 ```bash
 git clone https://github.com/pengyuw96/bili-sync-sponsorblock.git
@@ -91,9 +91,9 @@ cd bili-sync-sponsorblock
 
 | 项目 | 值 |
 |------|-----|
-| 本 Fork 版本字符串 | `3.1.3+sponsorblock-mark` |
-| 上游基线 | [v3.1.3](https://github.com/NeeYoonc/bili-sync-up/releases/tag/v3.1.3)（`f5a91a97`） |
-| 已发布 Release | [v3.1.2-sponsorblock-mark](https://github.com/pengyuw96/bili-sync-sponsorblock/releases/tag/v3.1.2-sponsorblock-mark)（上一版；本分支 `feature/sponsorblock-on-v3.1.3` 尚未发布） |
+| 本 Fork 版本字符串 | `3.1.4.1` |
+| 上游基线 | [v3.1.3](https://github.com/NeeYoonc/bili-sync-up/releases/tag/v3.1.3)（`f5a91a97`）。上游最新发布号是 [v3.1.4.1](https://github.com/NeeYoonc/bili-sync-up/releases/tag/v3.1.4.1)，本仓库尚未并入该版本的漫画源等改动。 |
+| 已发布 Release | [v3.1.2-sponsorblock-mark](https://github.com/pengyuw96/bili-sync-sponsorblock/releases/tag/v3.1.2-sponsorblock-mark) |
 
 ---
 

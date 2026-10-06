@@ -218,6 +218,79 @@ pub fn remap_mark_interval(
     Some((rs, re))
 }
 
+/// Removed regions implied by the keep ranges ffmpeg actually used.
+///
+/// `compute_keep_ranges` may absorb short gaps, so the real cut is the complement
+/// of `keeps`, not the raw SponsorBlock intervals.
+pub fn removes_from_keeps(keeps: &[(f64, f64)], duration: f64) -> Vec<(f64, f64)> {
+    if !(duration.is_finite() && duration > 0.0) {
+        return Vec::new();
+    }
+    let mut keeps: Vec<(f64, f64)> = keeps
+        .iter()
+        .copied()
+        .filter(|(s, e)| e > s && s.is_finite() && e.is_finite())
+        .map(|(s, e)| (s.clamp(0.0, duration), e.clamp(0.0, duration)))
+        .filter(|(s, e)| e > s)
+        .collect();
+    keeps.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+    let mut removes = Vec::new();
+    let mut cursor = 0.0_f64;
+    for (start, end) in keeps {
+        if start > cursor + 1e-3 {
+            removes.push((cursor, start));
+        }
+        cursor = cursor.max(end);
+    }
+    if duration > cursor + 1e-3 {
+        removes.push((cursor, duration));
+    }
+    removes
+}
+
+/// Pieces of `[start, end]` that survive `removes`, mapped onto the post-cut timeline.
+///
+/// A cue that spans a cut is split. A cue fully inside a cut disappears.
+/// Empty `removes` returns the original interval.
+pub fn surviving_pieces(start: f64, end: f64, removes: &[(f64, f64)]) -> Vec<(f64, f64)> {
+    if !(start.is_finite() && end.is_finite()) || end - start < 0.05 {
+        return Vec::new();
+    }
+    let removes = merge_remove_intervals(removes, 1e-3);
+    if removes.is_empty() {
+        return vec![(start, end)];
+    }
+
+    let mut pieces = vec![(start, end)];
+    for &(rs, re) in &removes {
+        let mut next = Vec::new();
+        for (s, e) in pieces {
+            if e <= rs + 1e-3 || s >= re - 1e-3 {
+                next.push((s, e));
+                continue;
+            }
+            if s < rs - 1e-3 {
+                next.push((s, rs.min(e)));
+            }
+            if e > re + 1e-3 {
+                next.push((re.max(s), e));
+            }
+        }
+        pieces = next;
+    }
+
+    pieces
+        .into_iter()
+        .filter(|(s, e)| e - s >= 0.05)
+        .filter_map(|(s, e)| {
+            let rs = remap_timestamp_after_removes(s, &removes);
+            let re = remap_timestamp_after_removes(e, &removes);
+            (re - rs >= 0.05).then_some((rs, re))
+        })
+        .collect()
+}
+
 /// Approximate post-cut duration = original − merged remove length (clamped).
 pub fn duration_after_removes(duration: f64, removes: &[(f64, f64)]) -> f64 {
     if !(duration.is_finite() && duration > 0.0) {
@@ -281,5 +354,28 @@ mod remap_tests {
     #[test]
     fn duration_after_removes_basic() {
         assert!((duration_after_removes(100.0, &[(10.0, 20.0), (50.0, 60.0)]) - 80.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn removes_from_keeps_matches_absorbed_gap() {
+        let removes = removes_from_keeps(&[(0.0, 10.0), (30.0, 100.0)], 100.0);
+        assert_eq!(removes.len(), 1);
+        assert!((removes[0].0 - 10.0).abs() < 1e-6);
+        assert!((removes[0].1 - 30.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn surviving_pieces_splits_cue_around_cut() {
+        let pieces = surviving_pieces(5.0, 40.0, &[(10.0, 20.0)]);
+        assert_eq!(pieces.len(), 2);
+        assert!((pieces[0].0 - 5.0).abs() < 1e-6);
+        assert!((pieces[0].1 - 10.0).abs() < 1e-6);
+        assert!((pieces[1].0 - 10.0).abs() < 1e-6);
+        assert!((pieces[1].1 - 30.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn surviving_pieces_drops_cue_inside_cut() {
+        assert!(surviving_pieces(12.0, 18.0, &[(10.0, 20.0)]).is_empty());
     }
 }

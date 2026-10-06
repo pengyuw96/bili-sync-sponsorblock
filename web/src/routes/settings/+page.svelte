@@ -195,7 +195,7 @@
 		notification: '配置扫描完成后的推送渠道、测试发送和通知内容。',
 		ai_rename: '配置 AI 自动重命名的启用范围、提示词和相关行为。',
 		sponsor_block:
-			'下载合并后按 BilibiliSponsorBlock 片段裁剪或嵌入章节标记；裁剪与标记互斥同一类别（裁剪优先）；与「下载后按章节切分」互斥；弹幕字幕可能不同步。',
+			'下载合并后按 BilibiliSponsorBlock 处理。裁剪会从成片去掉片段，并改写字幕和弹幕时间轴；章节标记写入视频章节、字幕和弹幕，供 Emby 用下一章节手动跳过。同一类别裁剪优先，并与「下载后按章节切分」互斥。',
 		system: '调整扫描间隔、监听端口、路径模板和基础系统行为。',
 		database: '查看数据库文件信息与各表数据量；可清理图片代理缓存、AI 对话历史、任务队列历史与孤立记录，执行 VACUUM 压缩或备份数据库。'
 	} as const;
@@ -5452,7 +5452,7 @@
 		if (!open) openSheet = null;
 	}}
 	title="SponsorBlock"
-	description="裁剪赞助段，或嵌入章节标记供播放器时间轴手动跳过"
+	description="裁剪会直接去掉片段；章节标记供 Emby 时间轴手动跳到下一段"
 	titleTooltip={getSettingTooltip('sponsor_block')}
 	{isMobile}
 >
@@ -5469,7 +5469,7 @@
 			>
 				<h4 class="mb-2 font-medium text-amber-800 dark:text-amber-400">功能说明</h4>
 				<p class="text-sm text-amber-700 dark:text-amber-300">
-					下载合并后按 BilibiliSponsorBlock 片段：可「裁剪」直接去掉，或「章节标记」嵌入时间轴供 Emby/Jellyfin 手动跳转（不会自动跳过）。同一类别不可同时勾选（裁剪优先）。与「下载后按章节切分」互斥；弹幕字幕在裁剪后可能不同步。
+					裁剪：从成片去掉对应片段（播放时等于自动跳过），并按新时间轴改写字幕和弹幕。章节标记：嵌入视频章节，并在字幕和弹幕里写入「〔SB〕」提示。Emby 没有按章节自动跳过，请用下一章节或章节菜单手动跳过。同一类别不可同时勾选（裁剪优先）。与「下载后按章节切分」互斥。
 				</p>
 				<p class="mt-2 text-xs text-amber-600 dark:text-amber-400">
 					片段数据来自
@@ -5521,7 +5521,7 @@
 							</label>
 						{/each}
 					</div>
-					<p class="text-muted-foreground text-xs">默认仅勾选赞助广告与垫片；勾选后用 ffmpeg 流拷贝裁掉对应片段。</p>
+					<p class="text-muted-foreground text-xs">默认仅勾选赞助广告与垫片。勾选后用 ffmpeg 流拷贝裁掉对应片段，并同步改写字幕与弹幕时间轴。</p>
 				</div>
 
 				<div class="space-y-2">
@@ -5545,7 +5545,7 @@
 						{/each}
 					</div>
 					<p class="text-sm text-amber-700 dark:text-amber-300">
-						标记会嵌入 Matroska/MP4 章节，供 Emby/Jellyfin 时间轴手动跳转，不会像浏览器插件那样自动跳过。已在「裁剪类别」勾选的项会自动禁用。
+						标记会嵌入视频章节，并写入现有字幕、一份 *.sponsorblock.zh.srt，以及顶部弹幕。Emby 不提供 SponsorBlock 式自动跳过按钮，用下一章节或章节菜单跳过。已在「裁剪类别」勾选的项会自动禁用。
 					</p>
 				</div>
 

@@ -10,7 +10,7 @@ use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::SimpleExpr;
 use sea_orm::{ActiveModelTrait, Condition, QueryFilter, QuerySelect, Set};
 use tokio_util::sync::CancellationToken;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::bilibili::{parse_event_name, DanmakuElem, DanmakuWriter, Dimension, PageInfo as BiliPageInfo, Video};
 use crate::config::Config;
@@ -500,6 +500,13 @@ pub async fn sync_page_danmaku(
             .with_context(|| format!("重命名弹幕文件 {:?} -> {:?} 失败", tmp_path, danmaku_path))?;
         fetched_danmaku_count
     };
+
+    if let Err(err) = crate::sponsorblock::sidecars::reapply_danmaku_after_write(danmaku_path).await {
+        warn!(
+            "SponsorBlock 弹幕时间轴重放失败（保留已写入弹幕）: 视频「{}」第 {} 页: {:#}",
+            video_model.name, fresh.page, err
+        );
+    }
 
     let now_str = to_standard_string(now.with_timezone(&beijing_timezone()));
     info!(

@@ -27,7 +27,7 @@
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import TrashIcon from '@lucide/svelte/icons/trash-2';
 	import XIcon from '@lucide/svelte/icons/x';
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import { get } from 'svelte/store';
 	import Loading from '$lib/components/ui/Loading.svelte';
@@ -40,6 +40,7 @@
 	let statusEditorOpen = false;
 	let statusEditorLoading = false;
 	let showVideoPlayer = false;
+	let playerPanel: HTMLDivElement | null = null;
 	let currentPlayingPageIndex = 0;
 	let onlinePlayMode = false; // false: 本地播放, true: 平台内嵌播放（抖音已取消在线播放）
 	let imageViewMode = false;
@@ -678,6 +679,30 @@
 		chargeLockedDisplayMode = null;
 	}
 
+	async function scrollPlayerIntoView() {
+		await tick();
+		playerPanel?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+	}
+
+	async function openLocalPlayer(index: number) {
+		currentPlayingPageIndex = index;
+		imageViewMode = false;
+		onlinePlayMode = false;
+		chargeLockedDisplayMode = null;
+		showVideoPlayer = true;
+		if (videoData?.video.skip_reason) showSkipReasonToast();
+		await scrollPlayerIntoView();
+	}
+
+	async function openOnlinePlayer(index: number) {
+		currentPlayingPageIndex = index;
+		imageViewMode = false;
+		onlinePlayMode = true;
+		chargeLockedDisplayMode = null;
+		showVideoPlayer = true;
+		await scrollPlayerIntoView();
+	}
+
 	// 获取视频播放源
 	function getVideoSource() {
 		const videoId = getPlayVideoId();
@@ -1120,14 +1145,7 @@
 											variant="default"
 											class="flex-1"
 											title="播放已下载视频"
-											onclick={() => {
-												currentPlayingPageIndex = index;
-												imageViewMode = false;
-												onlinePlayMode = false;
-												chargeLockedDisplayMode = null;
-												showVideoPlayer = true;
-												if (videoData?.video.skip_reason) showSkipReasonToast();
-											}}
+											onclick={() => openLocalPlayer(index)}
 										>
 											<PlayIcon class="mr-2 h-4 w-4" />
 											播放视频
@@ -1139,13 +1157,7 @@
 										variant="outline"
 										class="flex-1"
 										title="{platformLabel}内嵌播放（清晰度由平台控制）"
-										onclick={() => {
-											currentPlayingPageIndex = index;
-											imageViewMode = false;
-											onlinePlayMode = true;
-											chargeLockedDisplayMode = null;
-											showVideoPlayer = true;
-										}}
+										onclick={() => openOnlinePlayer(index)}
 									>
 										<PlayIcon class="mr-2 h-4 w-4" />
 										在线播放
@@ -1159,7 +1171,7 @@
 
 				<!-- 右侧/下方：视频播放器 -->
 				{#if showVideoPlayer && videoData}
-					<div class="w-full shrink-0 xl:w-[45%] 2xl:w-[40%]">
+					<div class="w-full shrink-0 scroll-mt-4 xl:w-[45%] 2xl:w-[40%]" bind:this={playerPanel}>
 						<div class="sticky top-4">
 							<div class="mb-4 flex items-center justify-between">
 								<div class="flex items-center gap-2">
@@ -1175,13 +1187,13 @@
 									</span>
 								</div>
 								<div class="flex items-center gap-2">
+									{#if !isExternal && getCurrentPageInfo()?.sponsor_cut_result}
+										<p class="text-muted-foreground px-1 text-xs">
+											{sponsorCutResultLabel(getCurrentPageInfo()?.sponsor_cut_result)}
+										</p>
+									{/if}
 									{#if getEmbeddedPlayerUrl() && !imageViewMode}
 										<Button size="sm" variant="ghost" onclick={togglePlayMode}>
-								{#if !isExternal && pageInfo.sponsor_cut_result}
-									<p class="text-muted-foreground px-1 text-xs">
-										{sponsorCutResultLabel(pageInfo.sponsor_cut_result)}
-									</p>
-								{/if}
 											{onlinePlayMode ? '切换到本地' : `切换到${platformLabel}内嵌`}
 										</Button>
 									{/if}

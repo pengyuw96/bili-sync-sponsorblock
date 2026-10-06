@@ -477,6 +477,8 @@ fn is_bili_request_failed_inaccessible(err: &anyhow::Error) -> bool {
 /// Map SponsorBlock cut outcome to page slot ExecutionStatus + persisted result code.
 async fn run_page_sponsor_cut(
     page_path: &Path,
+    danmaku_path: &Path,
+    subtitle_stem: &Path,
     video_model: &video::Model,
     page_info: &PageInfo,
     skip_for_chapters: bool,
@@ -484,6 +486,8 @@ async fn run_page_sponsor_cut(
     let sb_config = crate::config::reload_config().sponsor_block.clone();
     match crate::sponsorblock::maybe_cut_sponsor_segments(
         page_path,
+        danmaku_path,
+        subtitle_stem,
         &video_model.bvid,
         page_info.cid,
         page_info.duration,
@@ -7575,6 +7579,8 @@ async fn download_page(
         } else {
             let (st, code) = run_page_sponsor_cut(
                 &cut_path,
+                &danmaku_path_for_chapters,
+                &subtitle_path_for_chapters,
                 video_model,
                 &page_info,
                 skip_sponsor_cut_for_chapters,
@@ -7582,7 +7588,10 @@ async fn download_page(
             .await;
             sponsor_cut_result = code;
             if matches!(st, ExecutionStatus::Succeeded)
-                && sponsor_cut_result.as_deref() == Some("cut")
+                && matches!(
+                    sponsor_cut_result.as_deref(),
+                    Some("cut") | Some("cut_and_marked")
+                )
             {
                 if let Ok(meta) = tokio::fs::metadata(&cut_path).await {
                     page_file_size_bytes = Some(to_db_file_size(meta.len()));
@@ -10591,7 +10600,8 @@ async fn remove_original_page_artifacts(
                 .extension()
                 .and_then(|value| value.to_str())
                 .map(str::to_ascii_lowercase);
-            if matches!(ext.as_deref(), Some("srt") | Some("ass")) {
+            let is_sponsor_plan = ext.as_deref() == Some("json") && file_name.contains("sponsorblock");
+            if matches!(ext.as_deref(), Some("srt") | Some("ass") | Some("sb-orig")) || is_sponsor_plan {
                 let _ = remove_file_if_exists(&path).await?;
             }
         }
@@ -10751,6 +10761,12 @@ pub async fn fetch_page_subtitle(
                 page_info.page
             )
         })??;
+    if let Err(err) = crate::sponsorblock::sidecars::reapply_subtitles_after_write(subtitle_path).await {
+        warn!(
+            "SponsorBlock 字幕时间轴重放失败（保留已写入字幕）: 视频「{}」第 {} 页: {:#}",
+            video_model.name, page_info.page, err
+        );
+    }
     Ok(ExecutionStatus::Succeeded)
 }
 

@@ -95,7 +95,7 @@ fn build_http_client(timeout_ms: u64) -> Result<reqwest::Client, String> {
     headers.insert(
         "x-ext-version",
         reqwest::header::HeaderValue::from_str(CLIENT_VERSION)
-            .unwrap_or_else(|_| reqwest::header::HeaderValue::from_static("3.1.3")),
+            .unwrap_or_else(|_| reqwest::header::HeaderValue::from_static("3.1.4.1")),
     );
     reqwest::Client::builder()
         .timeout(Duration::from_millis(timeout_ms.max(1000)))
