@@ -216,6 +216,32 @@ async fn post(cfg: &MediaServerConfig, path: &str, body: Option<String>) -> Resu
     Ok(())
 }
 
+/// "emby" -> "Emby", "jellyfin" -> "Jellyfin"; anything else is shown as-is.
+fn display_server(server_type: &str) -> String {
+    match server_type.trim().to_ascii_lowercase().as_str() {
+        "emby" => "Emby".to_string(),
+        "jellyfin" => "Jellyfin".to_string(),
+        _ => server_type.to_string(),
+    }
+}
+
+/// Folder names (last path component) of up to 3 dirs joined by '、', plus "，等" when more.
+fn summarize_dirs(paths: &[String]) -> String {
+    let names: Vec<&str> = paths
+        .iter()
+        .take(3)
+        .map(|p| {
+            let t = p.trim_end_matches(['/', '\\']);
+            t.rsplit(['/', '\\']).next().filter(|n| !n.is_empty()).unwrap_or(t)
+        })
+        .collect();
+    let mut out = names.join("、");
+    if paths.len() > 3 {
+        out.push_str("，等");
+    }
+    out
+}
+
 pub async fn flush(cfg: &MediaServerConfig, paths: &[String]) -> Result<()> {
     let body = MediaUpdatedBody {
         updates: paths.iter().map(|p| MediaUpdate { path: p, update_type: "Created" }).collect(),
@@ -223,13 +249,25 @@ pub async fn flush(cfg: &MediaServerConfig, paths: &[String]) -> Result<()> {
     let body = serde_json::to_string(&body)?;
     match post(cfg, "/Library/Media/Updated", Some(body)).await {
         Ok(()) => {
-            info!("已通知{}定向扫描 {} 个目录: {:?}", cfg.server_type, paths.len(), paths);
+            info!(
+                "已通知 {} 定向扫描 {} 个目录（例：{}）",
+                display_server(&cfg.server_type),
+                paths.len(),
+                summarize_dirs(paths)
+            );
+            debug!("定向扫描目录完整列表: {:?}", paths);
             Ok(())
         }
         Err(e) if cfg.fallback_full_refresh => {
-            warn!("定向扫描失败({:#})，回退为全库扫描", e);
+            warn!(
+                "{} 定向扫描 {} 个目录失败({:#})，回退为全库扫描",
+                display_server(&cfg.server_type),
+                paths.len(),
+                e
+            );
+            debug!("定向扫描失败的目录完整列表: {:?}", paths);
             post(cfg, "/Library/Refresh", None).await?;
-            info!("已通知{}全库扫描", cfg.server_type);
+            info!("已通知 {} 全库扫描", display_server(&cfg.server_type));
             Ok(())
         }
         Err(e) => Err(e),
@@ -379,5 +417,14 @@ mod tests {
             serde_json::to_string(&body).unwrap(),
             r#"{"Updates":[{"Path":"/a","UpdateType":"Created"}]}"#
         );
+    }
+
+    #[test]
+    fn summarize_dirs_uses_folder_names() {
+        let p = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(summarize_dirs(&p(&["/a/b/视频一/", "C:\\x\\视频二"])), "视频一、视频二");
+        assert_eq!(summarize_dirs(&p(&["/a/1", "/a/2", "/a/3", "/a/4"])), "1、2、3，等");
+        assert_eq!(display_server("emby"), "Emby");
+        assert_eq!(display_server("Jellyfin"), "Jellyfin");
     }
 }
