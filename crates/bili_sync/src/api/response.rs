@@ -436,6 +436,10 @@ pub struct VideoInfo {
     pub path: String,
     pub category: i32,
     pub download_status: [u32; 5],
+    /// 派生的第 6 阶段「广告剪辑」：取该视频所有分P的 PageStatus 第 6 位（视频剪切）的最小值
+    /// （7=全部完成，0=待处理，1..=4=失败重试次数）。不是独立存储的状态位，仅 B 站视频有。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sponsor_cut_status: Option<u32>,
     pub cover: String,
     pub valid: bool,
     pub is_charge_video: bool,
@@ -479,6 +483,7 @@ impl From<(i32, String, String, String, String, i32, u32, String, bool, bool)> f
             path,
             category,
             download_status: VideoStatus::from(download_status).into(),
+            sponsor_cut_status: None,
             cover,
             valid,
             is_charge_video,
@@ -1533,3 +1538,45 @@ pub struct DatabaseRestoreResponse {
     /// 是否需要在重启后生效
     pub restart_required: bool,
 }
+
+/// 把多个分P的「视频剪切」槽位（PageStatus 第 6 位，index 5）聚合为视频级派生阶段：取最小值。
+/// 全部为 7 时返回 7；有待处理(0)/失败重试中(1..=4)时返回最小值；没有分P时返回 None。
+pub fn aggregate_sponsor_cut_status(page_statuses: impl IntoIterator<Item = u32>) -> Option<u32> {
+    page_statuses
+        .into_iter()
+        .map(|raw| {
+            let slots: [u32; 6] = crate::utils::status::PageStatus::from(raw).into();
+            slots[5]
+        })
+        .min()
+}
+
+#[cfg(test)]
+mod sponsor_cut_aggregate_tests {
+    use super::aggregate_sponsor_cut_status;
+
+    fn page_raw(slots: [u32; 6], completed: bool) -> u32 {
+        let mut v = 0u32;
+        for (i, s) in slots.iter().enumerate() {
+            v |= s << (i * 3);
+        }
+        if completed {
+            v |= 1 << 31;
+        }
+        v
+    }
+
+    #[test]
+    fn aggregates_min_of_cut_slot() {
+        assert_eq!(aggregate_sponsor_cut_status(Vec::<u32>::new()), None);
+        let ok = page_raw([7; 6], true);
+        let pending = page_raw([7, 7, 7, 7, 7, 0], false);
+        let failed = page_raw([7, 7, 7, 7, 7, 4], true);
+        assert_eq!(aggregate_sponsor_cut_status([ok, ok]), Some(7));
+        assert_eq!(aggregate_sponsor_cut_status([ok, pending]), Some(0));
+        assert_eq!(aggregate_sponsor_cut_status([ok, failed]), Some(4));
+        // 旧行（迁移前 slot5 未写）显示为待处理而不是完成
+        assert_eq!(aggregate_sponsor_cut_status([page_raw([7, 7, 7, 7, 7, 0], true)]), Some(0));
+    }
+}
+

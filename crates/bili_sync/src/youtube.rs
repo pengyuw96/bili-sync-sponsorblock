@@ -1921,6 +1921,7 @@ async fn unified_youtube_parts(
             path: parent_path,
             category: 0,
             download_status: video_status,
+            sponsor_cut_status: None,
             cover: video.thumbnail.clone().unwrap_or_default(),
             valid: true,
             is_charge_video: video.is_charge_video,

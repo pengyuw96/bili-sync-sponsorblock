@@ -3199,6 +3199,34 @@ fn resolve_height_filters(params: &VideosRequest) -> (Option<u32>, Option<u32>) 
 }
 
 /// 列出视频的基本信息，支持根据视频来源筛选、名称查找和分页
+/// 为 B 站视频填充派生的第 6 阶段「广告剪辑」（聚合分P的视频剪切槽位）。
+async fn fill_sponsor_cut_status(db: &DatabaseConnection, videos: &mut [VideoInfo]) -> Result<()> {
+    let ids: Vec<i32> = videos.iter().map(|v| v.id).collect();
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let mut by_video: HashMap<i32, Vec<u32>> = HashMap::new();
+    for chunk in ids.chunks(500) {
+        let rows = page::Entity::find()
+            .filter(page::Column::VideoId.is_in(chunk.to_vec()))
+            .select_only()
+            .columns([page::Column::VideoId, page::Column::DownloadStatus])
+            .into_tuple::<(i32, u32)>()
+            .all(db)
+            .await?;
+        for (vid, st) in rows {
+            by_video.entry(vid).or_default().push(st);
+        }
+    }
+    for v in videos.iter_mut() {
+        v.sponsor_cut_status = by_video
+            .remove(&v.id)
+            .and_then(crate::api::response::aggregate_sponsor_cut_status);
+    }
+    Ok(())
+}
+
+
 #[utoipa::path(
     get,
     path = "/api/videos",
@@ -3480,6 +3508,7 @@ pub async fn get_videos(
                     },
                 )
                 .collect();
+            fill_sponsor_cut_status(db.as_ref(), &mut videos).await?;
 
             let invalid_placeholder_video_ids = videos
                 .iter()
@@ -3975,6 +4004,7 @@ pub async fn get_video(
     }
     // 填充未达最低下载标准等主动跳过原因（B站视频）
     video_info.skip_reason = raw_video.skip_reason.clone();
+    fill_sponsor_cut_status(db.as_ref(), std::slice::from_mut(&mut video_info)).await?;
 
     let mut source = resolve_video_source_tag(db.as_ref(), &raw_video).await?;
     if let Some(source_tag) = source.as_mut() {
@@ -4246,7 +4276,7 @@ pub async fn reset_video(
     }
 
     // 获取所有分页信息（包括未重置的）
-    let all_pages_info = page::Entity::find()
+    let all_pages_info: Vec<PageInfo> = page::Entity::find()
         .filter(page::Column::VideoId.eq(id))
         .order_by_asc(page::Column::Pid)
         .select_only()
@@ -4263,6 +4293,8 @@ pub async fn reset_video(
         .map(PageInfo::from)
         .collect();
 
+    let mut video_info = video_info;
+    video_info.sponsor_cut_status = all_pages_info.iter().map(|p| p.download_status[5]).min();
     Ok(ApiResponse::ok(ResetVideoResponse {
         resetted,
         video: video_info,
@@ -5164,6 +5196,8 @@ pub async fn update_video_status(
     if has_video_updates || has_page_updates {
         crate::task::resume_scanning();
     }
+    let mut video_info = video_info;
+    video_info.sponsor_cut_status = pages_info.iter().map(|p| p.download_status[5]).min();
     Ok(ApiResponse::ok(UpdateVideoStatusResponse {
         success: has_video_updates || has_page_updates,
         video: video_info,

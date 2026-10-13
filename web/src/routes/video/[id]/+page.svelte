@@ -919,6 +919,7 @@
 					category: videoData.video.category,
 					cover: videoData.video.cover || '',
 					download_status: videoData.video.download_status,
+					sponsor_cut_status: videoData.video.sponsor_cut_status,
 					valid: videoData.video.valid,
 					is_charge_video: videoData.video.is_charge_video,
 					is_image_post: videoData.video.is_image_post,

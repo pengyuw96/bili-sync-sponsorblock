@@ -336,6 +336,8 @@ export interface VideoInfo {
 	path: string;
 	category: number;
 	download_status: [number, number, number, number, number];
+	/** 派生的第 6 阶段「广告剪辑」：各分P「视频剪切」槽位的最小值（仅 B 站视频） */
+	sponsor_cut_status?: number;
 	cover: string;
 	valid: boolean;
 	is_charge_video: boolean;
