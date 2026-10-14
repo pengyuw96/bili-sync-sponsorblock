@@ -127,6 +127,9 @@
 	}
 
 	function getTaskName(index: number): string {
+		if (index === 5 && video.sponsor_cut_status != null) {
+			return '广告剪辑（汇总各分P视频剪切）';
+		}
 		if (taskNames.length > 0) {
 			return taskNames[index] || `任务${index + 1}`;
 		}
@@ -147,9 +150,14 @@
 		}
 	}
 
-	$: overallStatus = getOverallStatus(video.download_status);
-	$: completed = video.download_status.filter((status) => status === 7).length;
-	$: total = video.download_status.length;
+	// B 站视频额外显示派生的第 6 阶段「广告剪辑」（聚合自分P状态，非独立存储位）
+	$: stages =
+		video.sponsor_cut_status != null
+			? [...video.download_status, video.sponsor_cut_status]
+			: [...video.download_status];
+	$: overallStatus = getOverallStatus(stages);
+	$: completed = stages.filter((status) => status === 7).length;
+	$: total = stages.length;
 
 	async function handleReset(force: boolean = false) {
 		resetting = true;
@@ -521,7 +529,7 @@
 
 					<!-- 进度条 -->
 					<div class="flex w-full {gap}">
-						{#each video.download_status as status, index (index)}
+						{#each stages as status, index (index)}
 							<Tooltip.Root>
 								<Tooltip.Trigger class="flex-1">
 									<div

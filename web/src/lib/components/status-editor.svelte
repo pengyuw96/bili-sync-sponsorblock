@@ -28,8 +28,17 @@
 		return ['视频封面', '视频信息', 'UP主头像', 'UP主信息', '分P下载'];
 	})();
 
-	const pageTaskNames = ['视频封面', '视频内容', '视频信息', '视频弹幕', '视频字幕'];
+	$: pageTaskNames = isExternal
+		? ['视频封面', '视频内容', '视频信息', '视频弹幕', '视频字幕']
+		: ['视频封面', '视频内容', '视频信息', '视频弹幕', '视频字幕', '视频剪切'];
 
+	// 第 6 阶段「广告剪辑」：仅 B 站分P有 6 槽时派生，实时反映分页编辑
+	$: derivedCutStatus =
+		video?.sponsor_cut_status != null && pages.length > 0
+			? Math.min(
+					...pages.map((p) => (pageStatuses[p.id] || p.download_status)[5] ?? 0)
+				)
+			: null;
 	let videoStatuses: number[] = [];
 	let pageStatuses: Record<number, number[]> = {};
 	let originalVideoStatuses: number[] = [];
@@ -304,6 +313,19 @@
 									disabled={loading}
 								/>
 							{/each}
+							{#if derivedCutStatus !== null}
+								<StatusTaskCard
+									taskName="广告剪辑（汇总）"
+									currentStatus={derivedCutStatus}
+									originalStatus={derivedCutStatus}
+									onStatusChange={() => {}}
+									onReset={() => {}}
+									disabled={true}
+								/>
+								<p class="text-muted-foreground px-1 text-xs">
+									「广告剪辑」由各分P的「视频剪切」状态汇总而来（取最差状态），不单独存储；请在「分页状态」中修改。
+								</p>
+							{/if}
 						</div>
 					</div>
 				</TabsContent>

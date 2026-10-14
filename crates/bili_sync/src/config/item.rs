@@ -186,11 +186,53 @@ pub struct RateLimit {
     pub duration: u64,
 }
 
+/// 视频 / 分页并发上限（NAS 上 ffmpeg 裁剪与合并很吃 CPU/IO）
+pub const MAX_MEDIA_CONCURRENCY: usize = 2;
+
+/// 把并发数限制到 1..=MAX_MEDIA_CONCURRENCY。
+pub fn clamp_media_concurrency(n: usize) -> usize {
+    n.clamp(1, MAX_MEDIA_CONCURRENCY)
+}
+
+impl ConcurrentLimit {
+    pub fn effective_video(&self) -> usize {
+        clamp_media_concurrency(self.video)
+    }
+    pub fn effective_page(&self) -> usize {
+        clamp_media_concurrency(self.page)
+    }
+    /// 旧配置里超出范围的值收敛到 1..=2，返回是否有修改。
+    pub fn clamp_in_place(&mut self) -> bool {
+        let (v, p) = (self.effective_video(), self.effective_page());
+        let changed = v != self.video || p != self.page;
+        self.video = v;
+        self.page = p;
+        changed
+    }
+}
+
+#[cfg(test)]
+mod media_concurrency_tests {
+    use super::*;
+
+    #[test]
+    fn defaults_are_one_and_clamped_to_two() {
+        let d = ConcurrentLimit::default();
+        assert_eq!((d.video, d.page), (1, 1));
+        let mut c = ConcurrentLimit { video: 5, page: 0, ..ConcurrentLimit::default() };
+        assert_eq!((c.effective_video(), c.effective_page()), (2, 1));
+        assert!(c.clamp_in_place());
+        assert_eq!((c.video, c.page), (2, 1));
+        assert!(!c.clamp_in_place());
+        assert_eq!(clamp_media_concurrency(2), 2);
+    }
+}
+
 impl Default for ConcurrentLimit {
     fn default() -> Self {
         Self {
-            video: 3,
-            page: 2,
+            video: 1,
+            page: 1,
             // 默认的限速配置，每 250ms 允许请求 4 次
             rate_limit: Some(RateLimit {
                 limit: 4,

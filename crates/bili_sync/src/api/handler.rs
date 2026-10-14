@@ -1176,6 +1176,7 @@ mod rename_tests {
             audio_stream_size_bytes: Set(None),
             image: Set(None),
             download_status: Set(31),
+            sponsor_cut_result: Set(None),
             created_at: Set("2026-05-30 12:00:00".to_string()),
             play_video_streams: Set(None),
             play_audio_streams: Set(None),
@@ -1507,6 +1508,7 @@ mod reset_path_tests {
             audio_stream_size_bytes: None,
             image: None,
             download_status: 31,
+            sponsor_cut_result: None,
             created_at: "2026-04-20 00:00:00".to_string(),
             play_video_streams: None,
             play_audio_streams: None,
@@ -2000,6 +2002,7 @@ mod queue_sse_tests {
             audio_stream_size_bytes: Set(None),
             image: Set(None),
             download_status: Set(0),
+            sponsor_cut_result: Set(None),
             created_at: Set("2026-03-28 00:00:00".to_string()),
             play_video_streams: Set(None),
             play_audio_streams: Set(None),
@@ -2081,7 +2084,7 @@ mod queue_sse_tests {
     }
 
     async fn insert_retry_charge_test_page(db: &DatabaseConnection, id: i32, video_id: i32) {
-        let completed_status: u32 = PageStatus::from([STATUS_OK; 5]).into();
+        let completed_status: u32 = PageStatus::from([STATUS_OK; 6]).into();
 
         page::ActiveModel {
             id: Set(id),
@@ -2098,6 +2101,7 @@ mod queue_sse_tests {
             audio_stream_size_bytes: Set(None),
             image: Set(None),
             download_status: Set(completed_status),
+            sponsor_cut_result: Set(None),
             created_at: Set("2026-03-28 00:00:00".to_string()),
             play_video_streams: Set(None),
             play_audio_streams: Set(None),
@@ -3210,6 +3214,34 @@ fn resolve_height_filters(params: &VideosRequest) -> (Option<u32>, Option<u32>) 
 }
 
 /// 列出视频的基本信息，支持根据视频来源筛选、名称查找和分页
+/// 为 B 站视频填充派生的第 6 阶段「广告剪辑」（聚合分P的视频剪切槽位）。
+async fn fill_sponsor_cut_status(db: &DatabaseConnection, videos: &mut [VideoInfo]) -> Result<()> {
+    let ids: Vec<i32> = videos.iter().map(|v| v.id).collect();
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let mut by_video: HashMap<i32, Vec<u32>> = HashMap::new();
+    for chunk in ids.chunks(500) {
+        let rows = page::Entity::find()
+            .filter(page::Column::VideoId.is_in(chunk.to_vec()))
+            .select_only()
+            .columns([page::Column::VideoId, page::Column::DownloadStatus])
+            .into_tuple::<(i32, u32)>()
+            .all(db)
+            .await?;
+        for (vid, st) in rows {
+            by_video.entry(vid).or_default().push(st);
+        }
+    }
+    for v in videos.iter_mut() {
+        v.sponsor_cut_status = by_video
+            .remove(&v.id)
+            .and_then(crate::api::response::aggregate_sponsor_cut_status);
+    }
+    Ok(())
+}
+
+
 #[utoipa::path(
     get,
     path = "/api/videos",
@@ -3497,6 +3529,7 @@ pub async fn get_videos(
                     },
                 )
                 .collect();
+            fill_sponsor_cut_status(db.as_ref(), &mut videos).await?;
 
             let invalid_placeholder_video_ids = videos
                 .iter()
@@ -4020,6 +4053,7 @@ pub async fn get_video(
     }
     // 填充未达最低下载标准等主动跳过原因（B站视频）
     video_info.skip_reason = raw_video.skip_reason.clone();
+    fill_sponsor_cut_status(db.as_ref(), std::slice::from_mut(&mut video_info)).await?;
 
     let mut source = resolve_video_source_tag(db.as_ref(), &raw_video).await?;
     if let Some(source_tag) = source.as_mut() {
@@ -4036,6 +4070,7 @@ pub async fn get_video(
             page::Column::Pid,
             page::Column::Name,
             page::Column::DownloadStatus,
+            page::Column::SponsorCutResult,
             page::Column::Path,
             page::Column::DanmakuLastSyncedAt,
             page::Column::DanmakuSyncGeneration,
@@ -4047,6 +4082,7 @@ pub async fn get_video(
             i32,
             String,
             u32,
+            Option<String>,
             Option<String>,
             Option<String>,
             u32,
@@ -4289,7 +4325,7 @@ pub async fn reset_video(
     }
 
     // 获取所有分页信息（包括未重置的）
-    let all_pages_info = page::Entity::find()
+    let all_pages_info: Vec<PageInfo> = page::Entity::find()
         .filter(page::Column::VideoId.eq(id))
         .order_by_asc(page::Column::Pid)
         .select_only()
@@ -4306,6 +4342,8 @@ pub async fn reset_video(
         .map(PageInfo::from)
         .collect();
 
+    let mut video_info = video_info;
+    video_info.sponsor_cut_status = all_pages_info.iter().map(|p| p.download_status[5]).min();
     Ok(ApiResponse::ok(ResetVideoResponse {
         resetted,
         video: video_info,
@@ -5166,7 +5204,7 @@ pub async fn update_video_status(
         if let Some(page_info) = page_id_map.remove(&page_update.page_id) {
             let mut page_status = PageStatus::from(page_info.download_status);
             for update in &page_update.updates {
-                if update.status_index < 5 {
+                if update.status_index < 6 {
                     page_status.set(update.status_index, update.status_value);
                 }
             }
@@ -5213,6 +5251,8 @@ pub async fn update_video_status(
     if has_video_updates || has_page_updates {
         crate::task::resume_scanning();
     }
+    let mut video_info = video_info;
+    video_info.sponsor_cut_status = pages_info.iter().map(|p| p.download_status[5]).min();
     Ok(ApiResponse::ok(UpdateVideoStatusResponse {
         success: has_video_updates || has_page_updates,
         video: video_info,
@@ -5869,7 +5909,7 @@ pub async fn add_video_source_internal(
                     video_source::Entity::update(existing_update).exec(&txn).await?;
 
                     // 确保目标路径存在
-                    std::fs::create_dir_all(&existing.path).map_err(|e| anyhow!("创建目录失败: {}", e))?;
+                    create_source_dir(&existing.path)?;
 
                     info!("番剧配置合并成功: {}", merge_message);
 
@@ -6013,7 +6053,7 @@ pub async fn add_video_source_internal(
                 let insert_result = video_source::Entity::insert(bangumi).exec(&txn).await?;
 
                 // 确保目标路径存在
-                std::fs::create_dir_all(&params.path).map_err(|e| anyhow!("创建目录失败: {}", e))?;
+                create_source_dir(&params.path)?;
 
                 let success_message = if !skipped_seasons.is_empty() {
                     format!(
@@ -6097,7 +6137,7 @@ pub async fn add_video_source_internal(
             };
 
             let insert_result = video_source::Entity::insert(pugv).exec(&txn).await?;
-            std::fs::create_dir_all(&params.path).map_err(|e| anyhow!("创建目录失败: {}", e))?;
+            create_source_dir(&params.path)?;
             info!("新课程添加完成: {} (season_id={})", params.name, params.source_id);
 
             AddVideoSourceResponse {
@@ -6261,7 +6301,7 @@ pub async fn add_video_source_internal(
     };
 
     // 确保目标路径存在
-    std::fs::create_dir_all(&params.path).map_err(|e| anyhow!("创建目录失败: {}", e))?;
+    create_source_dir(&params.path)?;
 
     txn.commit().await?;
     notify_video_sources_changed();
@@ -10092,6 +10132,7 @@ async fn validate_path_reset_safety(
                 audio_stream_size_bytes: None,
                 image: None,
                 download_status: 0,
+            sponsor_cut_result: None,
                 created_at: now_standard_string(),
                 play_video_streams: None,
                 play_audio_streams: None,
@@ -11250,6 +11291,43 @@ pub async fn get_config() -> Result<ApiResponse<crate::api::response::ConfigResp
             audio_prompt_hint: config.ai_rename.audio_prompt_hint.clone(),
             rename_parent_dir: config.ai_rename.rename_parent_dir,
         },
+        // SponsorBlock 裁剪配置
+        sponsor_block: {
+            let summary = crate::sponsorblock::health::last_health_summary();
+            crate::api::response::SponsorBlockConfigResponse {
+                enabled: config.sponsor_block.enabled,
+                server_address: config.sponsor_block.server_address.clone(),
+                mirror_server_addresses: config.sponsor_block.mirror_server_addresses.clone(),
+                categories: config.sponsor_block.categories.clone(),
+                mark_categories: config.sponsor_block.mark_categories.clone(),
+                action_types: config.sponsor_block.action_types.clone(),
+                cut_mode: config.sponsor_block.cut_mode.clone(),
+                min_segment_seconds: config.sponsor_block.min_segment_seconds,
+                min_keep_gap_seconds: config.sponsor_block.min_keep_gap_seconds,
+                api_timeout_ms: config.sponsor_block.api_timeout_ms,
+                fail_open: config.sponsor_block.fail_open,
+                last_ok: summary.as_ref().map(|s| s.last_ok),
+                checked_at: summary.as_ref().map(|s| s.checked_at.clone()),
+                heartbeat_interval_secs: config.sponsor_block.heartbeat_interval_secs,
+            }
+        },
+        media_server: crate::api::response::MediaServerConfigResponse {
+            enabled: config.media_server.enabled,
+            server_type: config.media_server.server_type.clone(),
+            url: config.media_server.url.clone(),
+            api_key_set: config.media_server.api_key.as_deref().is_some_and(|k| !k.is_empty()),
+            path_mappings: config
+                .media_server
+                .path_mappings
+                .iter()
+                .map(|m| crate::api::response::MediaServerPathMappingResponse {
+                    from: m.from.clone(),
+                    to: m.to.clone(),
+                })
+                .collect(),
+            delay_seconds: config.media_server.delay_seconds,
+            fallback_full_refresh: config.media_server.fallback_full_refresh,
+        },
         // 服务器绑定地址
         bind_address: config.bind_address.clone(),
     }))
@@ -11924,6 +12002,8 @@ fn config_update_field_display_name(field: &str) -> String {
         "risk_control.auto_solve.max_retries" => Some("自动打码最大重试"),
         "risk_control.auto_solve.solve_timeout" => Some("自动打码单次超时"),
         "ai_rename" => Some("AI重命名配置"),
+        "sponsor_block" => Some("SponsorBlock裁剪配置"),
+        "media_server" => Some("Emby/Jellyfin扫描通知"),
         _ => None,
     };
 
@@ -12599,14 +12679,16 @@ pub async fn update_config_internal(
 
     // 处理并发控制设置
     if let Some(concurrent_video) = params.concurrent_video {
-        if concurrent_video > 0 && concurrent_video != config.concurrent_limit.video {
+        let concurrent_video = crate::config::clamp_media_concurrency(concurrent_video);
+        if concurrent_video != config.concurrent_limit.video {
             config.concurrent_limit.video = concurrent_video;
             updated_fields.push("concurrent_video");
         }
     }
 
     if let Some(concurrent_page) = params.concurrent_page {
-        if concurrent_page > 0 && concurrent_page != config.concurrent_limit.page {
+        let concurrent_page = crate::config::clamp_media_concurrency(concurrent_page);
+        if concurrent_page != config.concurrent_limit.page {
             config.concurrent_limit.page = concurrent_page;
             updated_fields.push("concurrent_page");
         }
@@ -12857,6 +12939,7 @@ pub async fn update_config_internal(
         if concurrency == 0 {
             return Err(anyhow!("大源视频并发必须大于0").into());
         }
+        let concurrency = crate::config::clamp_media_concurrency(concurrency);
         if concurrency != config.submission_risk_control.large_source_concurrent_video {
             config.submission_risk_control.large_source_concurrent_video = concurrency;
             updated_fields.push("large_source_concurrent_video");
@@ -12867,6 +12950,7 @@ pub async fn update_config_internal(
         if concurrency == 0 {
             return Err(anyhow!("大源分页并发必须大于0").into());
         }
+        let concurrency = crate::config::clamp_media_concurrency(concurrency);
         if concurrency != config.submission_risk_control.large_source_concurrent_page {
             config.submission_risk_control.large_source_concurrent_page = concurrency;
             updated_fields.push("large_source_concurrent_page");
@@ -13242,6 +13326,129 @@ pub async fn update_config_internal(
         if config.ai_rename.rename_parent_dir != rename_parent_dir {
             config.ai_rename.rename_parent_dir = rename_parent_dir;
             updated_fields.push("ai_rename");
+        }
+    }
+
+    // 处理 Emby/Jellyfin 扫描通知配置更新（API 密钥不写日志）
+    {
+        let ms = &mut config.media_server;
+        let before = serde_json::to_value(&*ms).unwrap_or_default();
+        if let Some(v) = params.media_server_enabled {
+            ms.enabled = v;
+        }
+        if let Some(v) = params.media_server_type.as_deref() {
+            ms.server_type = if v.trim().eq_ignore_ascii_case("jellyfin") { "jellyfin" } else { "emby" }.to_string();
+        }
+        if let Some(v) = params.media_server_url.as_deref() {
+            ms.url = v.trim().trim_end_matches('/').to_string();
+        }
+        if let Some(v) = params.media_server_api_key.as_deref() {
+            let v = v.trim();
+            if !v.is_empty() {
+                ms.api_key = Some(v.to_string());
+            }
+        }
+        if params.media_server_clear_api_key == Some(true) {
+            ms.api_key = None;
+        }
+        if let Some(maps) = &params.media_server_path_mappings {
+            ms.path_mappings = maps
+                .iter()
+                .map(|m| crate::config::PathMapping { from: m.from.trim().to_string(), to: m.to.trim().to_string() })
+                .filter(|m| !m.from.is_empty() && !m.to.is_empty())
+                .collect();
+        }
+        if let Some(v) = params.media_server_delay_seconds {
+            ms.delay_seconds = v.min(3600);
+        }
+        if let Some(v) = params.media_server_fallback_full_refresh {
+            ms.fallback_full_refresh = v;
+        }
+        if serde_json::to_value(&*ms).unwrap_or_default() != before {
+            updated_fields.push("media_server");
+        }
+    }
+
+    // 处理 SponsorBlock 裁剪配置更新
+    let default_sponsor_block = crate::config::SponsorBlockConfig::default();
+    if let Some(enabled) = params.sponsor_block_enabled {
+        if config.sponsor_block.enabled != enabled {
+            config.sponsor_block.enabled = enabled;
+            updated_fields.push("sponsor_block");
+        }
+    }
+    if let Some(server_address) = &params.sponsor_block_server_address {
+        let normalized = if server_address.trim().is_empty() {
+            default_sponsor_block.server_address.clone()
+        } else {
+            server_address.trim().trim_end_matches('/').to_string()
+        };
+        if config.sponsor_block.server_address != normalized {
+            config.sponsor_block.server_address = normalized;
+            updated_fields.push("sponsor_block");
+        }
+    }
+    if let Some(mirrors) = &params.sponsor_block_mirror_server_addresses {
+        let normalized: Vec<String> = mirrors
+            .iter()
+            .map(|s| s.trim().trim_end_matches('/').to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if config.sponsor_block.mirror_server_addresses != normalized {
+            config.sponsor_block.mirror_server_addresses = normalized;
+            updated_fields.push("sponsor_block");
+        }
+    }
+    if let Some(categories) = &params.sponsor_block_categories {
+        // Allow empty cut list (mark-only mode); do not force defaults on explicit empty.
+        let final_categories: Vec<String> = categories
+            .iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if config.sponsor_block.categories != final_categories {
+            config.sponsor_block.categories = final_categories;
+            updated_fields.push("sponsor_block");
+        }
+    }
+    if let Some(mark_categories) = &params.sponsor_block_mark_categories {
+        let normalized: Vec<String> = mark_categories
+            .iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if config.sponsor_block.mark_categories != normalized {
+            config.sponsor_block.mark_categories = normalized;
+            updated_fields.push("sponsor_block");
+        }
+    }
+    // Cut wins: strip mark categories that also appear in cut list.
+    if params.sponsor_block_categories.is_some() || params.sponsor_block_mark_categories.is_some() {
+        let cut_set: std::collections::HashSet<String> =
+            config.sponsor_block.categories.iter().cloned().collect();
+        let before = config.sponsor_block.mark_categories.len();
+        config
+            .sponsor_block
+            .mark_categories
+            .retain(|c| !cut_set.contains(c));
+        if config.sponsor_block.mark_categories.len() != before {
+            updated_fields.push("sponsor_block");
+        }
+    }
+    if let Some(cut_mode) = params.sponsor_block_cut_mode.as_deref() {
+        let cut_mode = match cut_mode.trim() {
+            "accurate" => "accurate",
+            _ => "keyframe",
+        };
+        if config.sponsor_block.cut_mode != cut_mode {
+            config.sponsor_block.cut_mode = cut_mode.to_string();
+            updated_fields.push("sponsor_block");
+        }
+    }
+    if let Some(fail_open) = params.sponsor_block_fail_open {
+        if config.sponsor_block.fail_open != fail_open {
+            config.sponsor_block.fail_open = fail_open;
+            updated_fields.push("sponsor_block");
         }
     }
 
@@ -13675,6 +13882,17 @@ pub async fn update_config_internal(
                 | "ai_rename.audio_prompt_hint" => {
                     manager
                         .update_config_item("ai_rename", serde_json::to_value(&config.ai_rename)?)
+                        .await
+                }
+                "media_server" => {
+                    manager
+                        .update_config_item("media_server", serde_json::to_value(&config.media_server)?)
+                        .await
+                }
+                // SponsorBlock 裁剪配置
+                "sponsor_block" => {
+                    manager
+                        .update_config_item("sponsor_block", serde_json::to_value(&config.sponsor_block)?)
                         .await
                 }
                 _ => {
@@ -16925,8 +17143,9 @@ pub async fn get_config_item(
 
     match config_item {
         Some(item) => {
-            let value: serde_json::Value =
+            let mut value: serde_json::Value =
                 serde_json::from_str(&item.value_json).map_err(|e| ApiError::from(anyhow!("解析配置值失败: {}", e)))?;
+            crate::media_server::redact_config_value(&item.key_name, &mut value);
 
             let response = ConfigItemResponse {
                 key: item.key_name,
@@ -16970,9 +17189,11 @@ pub async fn update_config_item_internal(
     }
 
     // 返回响应
+    let mut value = request.value;
+    crate::media_server::redact_config_value(&key, &mut value);
     let response = ConfigItemResponse {
         key: key.clone(),
-        value: request.value,
+        value,
         updated_at: now_standard_string(),
     };
 
@@ -19982,6 +20203,7 @@ async fn update_bangumi_video_path_in_database(
             audio_stream_size_bytes: None,
             image: None,
             download_status: 0,
+            sponsor_cut_result: None,
             created_at: now_standard_string(),
             play_video_streams: None,
             play_audio_streams: None,
@@ -20140,6 +20362,7 @@ async fn move_bangumi_files_to_new_path(
             audio_stream_size_bytes: None,
             image: None,
             download_status: 0,
+            sponsor_cut_result: None,
             created_at: now_standard_string(),
             play_video_streams: None,
             play_audio_streams: None,
@@ -22950,4 +23173,97 @@ async fn get_videos_with_pages_for_source(
     }
 
     Ok(result)
+}
+
+
+/// SponsorBlock 服务器心跳检测（主站 + 镜像）。
+///
+/// 调用上游 `GET {server}/api/status`；不阻塞下载（fail-open）。
+/// Spec: https://github.com/hanydd/BilibiliSponsorBlock/wiki/API
+#[utoipa::path(
+    get,
+    path = "/api/sponsorblock/health",
+    responses(
+        (status = 200, body = ApiResponse<crate::sponsorblock::health::SponsorBlockHealthResponse>),
+    ),
+    security(("Token" = []))
+)]
+pub async fn get_sponsorblock_health(
+) -> Result<ApiResponse<crate::sponsorblock::health::SponsorBlockHealthResponse>, ApiError> {
+    let config = crate::config::reload_config().sponsor_block;
+    let servers = crate::sponsorblock::health::check_all(&config).await;
+    let summary = crate::sponsorblock::health::last_health_summary().unwrap_or(
+        crate::sponsorblock::health::LastHealthSummary {
+            last_ok: false,
+            checked_at: crate::utils::time_format::now_standard_string(),
+            any_ok: false,
+            primary_ok: None,
+            primary_latency_ms: None,
+        },
+    );
+    Ok(ApiResponse::ok(
+        crate::sponsorblock::health::SponsorBlockHealthResponse {
+            servers,
+            last_ok: summary.last_ok,
+            checked_at: summary.checked_at,
+        },
+    ))
+}
+
+
+/// Create a video source directory with an actionable error.
+///
+/// In Docker the usual cause of `Permission denied (os error 13)` is a path
+/// whose top-level folder is not a mounted volume (e.g. `/bili-sync/...` when
+/// only `/media/bili-sync` is mounted): the container user cannot create
+/// folders in the image root.
+fn create_source_dir(path: impl AsRef<std::path::Path>) -> anyhow::Result<()> {
+    let path = path.as_ref();
+    std::fs::create_dir_all(path).map_err(|e| anyhow!("{}", describe_create_dir_error(path, &e)))
+}
+
+fn describe_create_dir_error(path: &std::path::Path, e: &std::io::Error) -> String {
+    let mut msg = format!("创建目录失败: {} ({})", e, path.display());
+    if e.kind() == std::io::ErrorKind::PermissionDenied {
+        let mut root = std::path::PathBuf::new();
+        for comp in path.components().take(2) {
+            root.push(comp);
+        }
+        if path.is_absolute() && !root.exists() {
+            msg.push_str(&format!(
+                "。顶层目录 {} 不存在，多半是没有挂载这个路径：请在 docker-compose 的 volumes 里把宿主机媒体目录挂到 /bili-sync（推荐），或把路径改成已挂载的目录",
+                root.display()
+            ));
+        } else {
+            msg.push_str("。请检查宿主机目录对容器用户（compose 里的 user）是否可写");
+        }
+        tracing::error!("{}", msg);
+    }
+    msg
+}
+
+#[cfg(test)]
+mod create_source_dir_tests {
+    use super::describe_create_dir_error;
+
+    #[test]
+    fn hints_missing_mount() {
+        let e = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        let msg = describe_create_dir_error(std::path::Path::new("/definitely-not-mounted-xyz/投稿/a"), &e);
+        assert!(msg.contains("/definitely-not-mounted-xyz"));
+        assert!(msg.contains("没有挂载"));
+    }
+}
+
+/// 测试 Emby/Jellyfin 连接（使用已保存的配置）：`GET {url}/System/Info`。
+pub async fn test_media_server() -> Result<ApiResponse<serde_json::Value>, ApiError> {
+    let cfg = crate::config::reload_config().media_server.clone();
+    if cfg.url.trim().is_empty() || cfg.api_key.as_deref().unwrap_or("").is_empty() {
+        return Ok(ApiResponse::ok(serde_json::json!({"ok": false, "message": "请先保存服务器地址和 API 密钥"})));
+    }
+    let body = match crate::media_server::test_connection(&cfg).await {
+        Ok(info) => serde_json::json!({"ok": true, "message": info}),
+        Err(e) => serde_json::json!({"ok": false, "message": format!("{:#}", e)}),
+    };
+    Ok(ApiResponse::ok(body))
 }

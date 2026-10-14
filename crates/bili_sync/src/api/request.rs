@@ -356,6 +356,24 @@ pub struct UpdateConfigRequest {
     pub ai_rename_enable_collection: Option<bool>,
     pub ai_rename_enable_bangumi: Option<bool>,
     pub ai_rename_rename_parent_dir: Option<bool>,
+    // SponsorBlock 裁剪配置
+    pub sponsor_block_enabled: Option<bool>,
+    pub sponsor_block_server_address: Option<String>,
+    pub sponsor_block_mirror_server_addresses: Option<Vec<String>>,
+    pub sponsor_block_categories: Option<Vec<String>>,
+    pub sponsor_block_mark_categories: Option<Vec<String>>,
+    pub sponsor_block_cut_mode: Option<String>,
+    pub sponsor_block_fail_open: Option<bool>,
+    // Emby/Jellyfin 扫描通知
+    pub media_server_enabled: Option<bool>,
+    pub media_server_type: Option<String>,
+    pub media_server_url: Option<String>,
+    /// 留空/不传 = 不修改；传 "" 由 media_server_clear_api_key 控制清除
+    pub media_server_api_key: Option<String>,
+    pub media_server_clear_api_key: Option<bool>,
+    pub media_server_path_mappings: Option<Vec<crate::config::PathMapping>>,
+    pub media_server_delay_seconds: Option<u64>,
+    pub media_server_fallback_full_refresh: Option<bool>,
     // 服务器绑定地址
     pub bind_address: Option<String>,
 }

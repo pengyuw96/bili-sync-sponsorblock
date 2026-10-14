@@ -97,7 +97,10 @@ pub(crate) fn describe_config_key(key: &str) -> &'static str {
         "submission_default_path" => "投稿默认路径模板（旧版）",
         "version" => "旧版配置版本号",
         "risk_control" => "风控验证配置",
+        "sponsor_block" => "BilibiliSponsorBlock 赞助/垫片裁剪与章节标记",
+        "split_chapters_after_download" => "下载后按播放器章节切分",
         "ai_rename" => "AI重命名配置",
+        "media_server" => "Emby/Jellyfin 扫描通知",
         _ => "未知/未定义",
     }
 }
@@ -472,6 +475,17 @@ impl ConfigManager {
             error!("配置JSON内容: {}", format_config_json_for_log(&config_json));
             anyhow!("从数据库数据构建配置对象失败: {}", e)
         })?;
+        let mut config = config;
+        let (old_v, old_p) = (config.concurrent_limit.video, config.concurrent_limit.page);
+        if config.concurrent_limit.clamp_in_place() {
+            warn!(
+                "并发配置超出范围 1-2（视频 {}、分页 {}），已按 视频 {}、分页 {} 运行",
+                old_v, old_p, config.concurrent_limit.video, config.concurrent_limit.page
+            );
+        }
+        let sr = &mut config.submission_risk_control;
+        sr.large_source_concurrent_video = super::item::clamp_media_concurrency(sr.large_source_concurrent_video);
+        sr.large_source_concurrent_page = super::item::clamp_media_concurrency(sr.large_source_concurrent_page);
 
         Ok(config)
     }
@@ -865,8 +879,8 @@ impl ConfigManager {
             sql,
             vec![
                 key.into(),
-                old_value.into(),
-                new_value.into(),
+                old_value.map(|v| crate::media_server::redact_config_json(key, v)).into(),
+                crate::media_server::redact_config_json(key, new_value).into(),
                 now_standard_string().into(),
             ],
         );

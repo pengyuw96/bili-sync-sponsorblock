@@ -29,7 +29,7 @@
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import TrashIcon from '@lucide/svelte/icons/trash-2';
 	import XIcon from '@lucide/svelte/icons/x';
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import { get } from 'svelte/store';
 	import Loading from '$lib/components/ui/Loading.svelte';
@@ -42,6 +42,7 @@
 	let statusEditorOpen = false;
 	let statusEditorLoading = false;
 	let showVideoPlayer = false;
+	let playerPanel: HTMLDivElement | null = null;
 	let currentPlayingPageIndex = 0;
 	let onlinePlayMode = false; // false: 本地播放, true: 平台内嵌播放（抖音已取消在线播放）
 	let imageViewMode = false;
@@ -181,6 +182,31 @@
 				Number(second)
 			)
 		);
+	}
+
+	
+	function sponsorCutResultLabel(code?: string | null): string {
+		switch (code) {
+			case 'cut':
+				return '已剪切';
+			case 'marked':
+				return '已标记章节';
+			case 'cut_and_marked':
+				return '已剪切并标记';
+			case 'none':
+				return '已对比，无片段';
+			case 'disabled':
+				return '未启用';
+			case 'skipped_chapters':
+				return '章节分割跳过';
+			case 'would_remove_all':
+				return '片段过多已保留原片';
+			case 'failed_open':
+			case 'error':
+				return '处理失败（保留原片）';
+			default:
+				return code ? `SponsorBlock：${code}` : '';
+		}
 	}
 
 	function getDanmakuStageLabel(generation: number) {
@@ -657,6 +683,30 @@
 		chargeLockedDisplayMode = null;
 	}
 
+	async function scrollPlayerIntoView() {
+		await tick();
+		playerPanel?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+	}
+
+	async function openLocalPlayer(index: number) {
+		currentPlayingPageIndex = index;
+		imageViewMode = false;
+		onlinePlayMode = false;
+		chargeLockedDisplayMode = null;
+		showVideoPlayer = true;
+		if (videoData?.video.skip_reason) showSkipReasonToast();
+		await scrollPlayerIntoView();
+	}
+
+	async function openOnlinePlayer(index: number) {
+		currentPlayingPageIndex = index;
+		imageViewMode = false;
+		onlinePlayMode = true;
+		chargeLockedDisplayMode = null;
+		showVideoPlayer = true;
+		await scrollPlayerIntoView();
+	}
+
 	// 获取视频播放源
 	function getVideoSource() {
 		const videoId = getPlayVideoId();
@@ -873,6 +923,7 @@
 					category: videoData.video.category,
 					cover: videoData.video.cover || '',
 					download_status: videoData.video.download_status,
+					sponsor_cut_status: videoData.video.sponsor_cut_status,
 					valid: videoData.video.valid,
 					is_charge_video: videoData.video.is_charge_video,
 					is_image_post: videoData.video.is_image_post,
@@ -1016,7 +1067,7 @@
 									customSubtitle=""
 									taskNames={isExternal
 										? ['视频封面', '视频内容', '视频 NFO', isDouyin || isTikTok ? '作品信息' : '直播聊天', '视频字幕']
-										: ['视频封面', '视频内容', '视频信息', '视频弹幕', '视频字幕']}
+										: ['视频封面', '视频内容', '视频信息', '视频弹幕', '视频字幕', '视频剪切']}
 									showProgress={true}
 								/>
 
@@ -1119,14 +1170,7 @@
 											variant="default"
 											class="flex-1"
 											title="播放已下载视频"
-											onclick={() => {
-												currentPlayingPageIndex = index;
-												imageViewMode = false;
-												onlinePlayMode = false;
-												chargeLockedDisplayMode = null;
-												showVideoPlayer = true;
-												if (videoData?.video.skip_reason) showSkipReasonToast();
-											}}
+											onclick={() => openLocalPlayer(index)}
 										>
 											<PlayIcon class="mr-2 h-4 w-4" />
 											播放视频
@@ -1138,13 +1182,7 @@
 										variant="outline"
 										class="flex-1"
 										title="{platformLabel}内嵌播放（清晰度由平台控制）"
-										onclick={() => {
-											currentPlayingPageIndex = index;
-											imageViewMode = false;
-											onlinePlayMode = true;
-											chargeLockedDisplayMode = null;
-											showVideoPlayer = true;
-										}}
+										onclick={() => openOnlinePlayer(index)}
 									>
 										<PlayIcon class="mr-2 h-4 w-4" />
 										在线播放
@@ -1158,7 +1196,7 @@
 
 				<!-- 右侧/下方：视频播放器 -->
 				{#if showVideoPlayer && videoData}
-					<div class="w-full shrink-0 {isMangaChapter ? 'xl:w-[60%] 2xl:w-[55%]' : 'xl:w-[45%] 2xl:w-[40%]'}">
+					<div class="w-full shrink-0 scroll-mt-4 {isMangaChapter ? 'xl:w-[60%] 2xl:w-[55%]' : 'xl:w-[45%] 2xl:w-[40%]'}" bind:this={playerPanel}>
 						<div class="sticky top-4">
 							<div class="mb-4 flex items-center justify-between">
 								<div class="flex items-center gap-2">
@@ -1176,6 +1214,11 @@
 									</span>
 								</div>
 								<div class="flex items-center gap-2">
+									{#if !isExternal && !isMangaChapter && getCurrentPageInfo()?.sponsor_cut_result}
+										<p class="text-muted-foreground px-1 text-xs">
+											{sponsorCutResultLabel(getCurrentPageInfo()?.sponsor_cut_result)}
+										</p>
+									{/if}
 									{#if getEmbeddedPlayerUrl() && !imageViewMode && !isMangaChapter}
 										<Button size="sm" variant="ghost" onclick={togglePlayMode}>
 											{onlinePlayMode ? '切换到本地' : `切换到${platformLabel}内嵌`}

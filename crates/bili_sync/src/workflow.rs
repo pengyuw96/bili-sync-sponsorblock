@@ -403,8 +403,8 @@ impl LargeSourceDownloadPolicy {
         Self {
             active: true,
             trigger_reasons,
-            video_concurrency: config.large_source_concurrent_video.max(1),
-            page_concurrency: config.large_source_concurrent_page.max(1),
+            video_concurrency: crate::config::clamp_media_concurrency(config.large_source_concurrent_video),
+            page_concurrency: crate::config::clamp_media_concurrency(config.large_source_concurrent_page),
             max_videos_per_round: non_zero_limit(config.large_source_max_videos_per_round),
             max_pages_per_round: non_zero_limit(config.large_source_max_pages_per_round),
             playurl_rate_limit: Some(crate::bilibili::PlayurlRateLimitConfig {
@@ -473,7 +473,64 @@ fn is_bili_request_failed_inaccessible(err: &anyhow::Error) -> bool {
     is_bili_request_failed_with_codes(err, &[-404, 62002, 62012])
 }
 
-fn first_inaccessible_page_error(results: &[Result<ExecutionStatus>; 5]) -> Option<&anyhow::Error> {
+
+/// Map SponsorBlock cut outcome to page slot ExecutionStatus + persisted result code.
+async fn run_page_sponsor_cut(
+    page_path: &Path,
+    danmaku_path: &Path,
+    subtitle_stem: &Path,
+    video_model: &video::Model,
+    page_info: &PageInfo,
+    skip_for_chapters: bool,
+) -> (ExecutionStatus, Option<String>, Option<u32>) {
+    let sb_config = crate::config::reload_config().sponsor_block.clone();
+    match crate::sponsorblock::maybe_cut_sponsor_segments(
+        page_path,
+        danmaku_path,
+        subtitle_stem,
+        &video_model.bvid,
+        page_info.cid,
+        page_info.duration,
+        &sb_config,
+        skip_for_chapters,
+    )
+    .await
+    {
+        Ok(outcome) => {
+            debug!(
+                "SponsorBlock outcome for {} cid={}: {:?}",
+                video_model.bvid, page_info.cid, outcome
+            );
+            let code = outcome.result_code().to_string();
+            let measured_duration_secs = outcome.measured_duration_secs();
+            let status = match &outcome {
+                crate::sponsorblock::SponsorCutOutcome::Disabled
+                | crate::sponsorblock::SponsorCutOutcome::SkippedForChapters => {
+                    ExecutionStatus::Skipped
+                }
+                // Fail-open / noop / cut all count as succeeded so the page can complete.
+                crate::sponsorblock::SponsorCutOutcome::Noop
+                | crate::sponsorblock::SponsorCutOutcome::WouldRemoveAll
+                | crate::sponsorblock::SponsorCutOutcome::FailedOpen
+                | crate::sponsorblock::SponsorCutOutcome::Cut { .. }
+                | crate::sponsorblock::SponsorCutOutcome::Marked { .. }
+                | crate::sponsorblock::SponsorCutOutcome::CutAndMarked { .. } => {
+                    ExecutionStatus::Succeeded
+                }
+            };
+            (status, Some(code), measured_duration_secs)
+        }
+        Err(e) => {
+            warn!(
+                "SponsorBlock cut hard error for {} cid={}: {:#}",
+                video_model.bvid, page_info.cid, e
+            );
+            (ExecutionStatus::Failed(e), Some("error".to_string()), None)
+        }
+    }
+}
+
+fn first_inaccessible_page_error(results: &[Result<ExecutionStatus>; 6]) -> Option<&anyhow::Error> {
     results
         .iter()
         .filter_map(|res| res.as_ref().err())
@@ -2147,7 +2204,7 @@ pub async fn fetch_video_details(
 
         // 使用信号量控制并发数
         let current_config = crate::config::reload_config();
-        let semaphore = Semaphore::new(current_config.concurrent_limit.video);
+        let semaphore = Semaphore::new(current_config.concurrent_limit.effective_video());
 
         let tasks = normal_videos
             .into_iter()
@@ -2239,7 +2296,7 @@ pub async fn fetch_video_details(
                                     );
 
                                     let ok_video_status: u32 = VideoStatus::from([STATUS_OK; 5]).into();
-                                    let ok_page_status: u32 = PageStatus::from([STATUS_OK; 5]).into();
+                                    let ok_page_status: u32 = PageStatus::from([STATUS_OK; 6]).into();
 
                                     video::Entity::update(video::ActiveModel {
                                         id: Unchanged(video_id),
@@ -2842,8 +2899,8 @@ pub async fn download_unprocessed_videos(
         source_video_count,
         source_page_count,
         original_unhandled_page_count,
-        current_config.concurrent_limit.video,
-        current_config.concurrent_limit.page,
+        current_config.concurrent_limit.effective_video(),
+        current_config.concurrent_limit.effective_page(),
     );
     let semaphore = Semaphore::new(large_source_policy.video_concurrency);
     if large_source_policy.active {
@@ -3754,8 +3811,8 @@ pub async fn retry_failed_videos_once(
         source_video_count,
         source_page_count,
         original_failed_page_count,
-        current_config.concurrent_limit.video,
-        current_config.concurrent_limit.page,
+        current_config.concurrent_limit.effective_video(),
+        current_config.concurrent_limit.effective_page(),
     );
     if large_source_policy.active {
         failed_videos_pages = limit_large_source_download_queue(
@@ -4249,6 +4306,7 @@ async fn download_video_pages(
                 audio_stream_size_bytes: None,
                 image: None,
                 download_status: 0,
+                sponsor_cut_result: None,
                 created_at: now_standard_string(),
                 play_video_streams: None,
                 play_audio_streams: None,
@@ -5703,6 +5761,10 @@ async fn download_video_pages(
                         || split_chapters_use_season_structure
                         || (is_collection && collection_use_season_structure))
                     && (should_download_season_poster || should_backfill_collection_root_assets)
+                    // No folder-level prefix (single-page video in its own folder): the
+                    // episode art `<stem>-thumb.jpg` / `<stem>-fanart.jpg` is the cover.
+                    // Writing `-thumb.jpg` / `-fanart.jpg` here broke Emby covers.
+                    && !video_base_name.trim().is_empty()
             },
             &video_model,
             downloader,
@@ -6138,7 +6200,7 @@ async fn download_video_pages(
         }
 
         // 立即修复数据库分页状态，避免前端仍显示“分页未完成”
-        let ok_page_status: u32 = PageStatus::from([STATUS_OK; 5]).into();
+        let ok_page_status: u32 = PageStatus::from([STATUS_OK; 6]).into();
         let txn =
             crate::database::begin_traced_transaction(connection, "workflow.mark_charge_video_placeholder_complete")
                 .await?;
@@ -6666,7 +6728,7 @@ async fn dispatch_download_page(args: DownloadPageArgs<'_>, token: CancellationT
                 // 这样会导致即使分页中有失败到 MAX_RETRY 的情况，视频层的分 P 下载状态也会被认为是 Succeeded，不够准确
                 // 新版本实现会将此处取值为所有子任务状态的最小值，这样只有所有分页的子任务全部成功时才会认为视频层的分 P 下载状态是 Succeeded
                 let page_download_status = *model.download_status.try_as_ref().expect("download_status must be set");
-                let separate_status: [u32; 5] = PageStatus::from(page_download_status).into();
+                let separate_status: [u32; 6] = PageStatus::from(page_download_status).into();
                 for status in separate_status {
                     target_status = target_status.min(status);
                 }
@@ -6979,6 +7041,8 @@ async fn download_page(
     };
     let original_page_model = page_model.clone();
     let mut status = PageStatus::from(page_model.download_status);
+    // PageStatus 5→6: old completed rows may still have bit31 while slot5 should_run.
+    status.reconcile_completed();
     let mut separate_status = status.should_run();
     let is_single_page = video_model.single_page.context("single_page is null")?;
 
@@ -7002,6 +7066,7 @@ async fn download_page(
         separate_status[2] = false; // 跳过NFO
         separate_status[3] = false; // 跳过弹幕
         separate_status[4] = false; // 跳过字幕
+        separate_status[5] = false; // 跳过 SponsorBlock 剪切（纯音频不适用）
     }
 
     // 检查是否为番剧
@@ -7167,11 +7232,8 @@ async fn download_page(
                     }
                 }
             } else {
-                // 单P视频：使用page_name模板
-                crate::config::with_config(|bundle| {
-                    bundle.render_page_template(&page_format_args(video_model, &page_model))
-                })
-                .map_err(|e| anyhow::anyhow!("模板渲染失败: {}", e))?
+                // 单P视频：文件名与视频目录名一致；共享目录时回退 page_name 模板
+                single_page_stem_from_config(&base_path, video_model, &page_model)?
             }
         }
     } else if is_submission_collection_video {
@@ -7190,6 +7252,10 @@ async fn download_page(
                 &video_model.name,
                 &page_model.name,
             )
+        } else if is_single_page && !submission_collection_uses_episode_names(is_up_seasonal) {
+            // Single-page submission that merely belongs to a UGC season: each video
+            // has its own folder, so name every file after that folder.
+            single_page_stem_from_config(&base_path, video_model, &page_model)?
         } else if matches!(config.collection_folder_mode.as_ref(), "unified" | "up_seasonal") {
             // 投稿源中的UGC合集视频也复用合集统一命名模板
             let episode_number = video_model.episode_number.unwrap_or(page_model.pid.max(1)).max(1);
@@ -7234,10 +7300,7 @@ async fn download_page(
                 }
             }
         } else {
-            crate::config::with_config(|bundle| {
-                bundle.render_page_template(&page_format_args(video_model, &page_model))
-            })
-            .map_err(|e| anyhow::anyhow!("模板渲染失败: {}", e))?
+            single_page_stem_from_config(&base_path, video_model, &page_model)?
         }
     } else if is_bangumi {
         // 番剧使用专用的模板方法
@@ -7286,8 +7349,8 @@ async fn download_page(
             }
         }
     } else {
-        // 单P视频使用最新配置的page_name模板
-        render_single_page_base_name_from_config(video_model, &page_model)?
+        // 单P视频：文件名与视频目录名一致（<folder>/<folder>.mp4），共享目录时回退 page_name 模板
+        single_page_stem_from_config(&base_path, video_model, &page_model)?
     };
 
     // 根据audio_only设置选择文件扩展名
@@ -7408,6 +7471,7 @@ async fn download_page(
         fanart_path,
         token.clone(),
     ));
+    let skip_sponsor_cut_for_chapters = video_source.split_chapters_after_download();
     let res_2_fut = Box::pin(fetch_page_video(
         separate_status[1],
         bili_client,
@@ -7542,7 +7606,67 @@ async fn download_page(
         Err(err) => (Err(err), None),
     };
 
-    let raw_results = [res_1, res_2, res_3, res_4, res_5];
+    // Slot 5: SponsorBlock 视频剪切（验收位）。媒体已存在时可单独重跑，不必重下。
+    let mut sponsor_cut_result: Option<String> = None;
+    let mut page_duration_after_cut: Option<u32> = None;
+    let res_6: Result<ExecutionStatus> = if !separate_status[5] {
+        Ok(ExecutionStatus::Skipped)
+    } else if skip_sidecars {
+        Ok(ExecutionStatus::Skipped)
+    } else if m4a_only_mode {
+        sponsor_cut_result = Some("disabled".to_string());
+        Ok(ExecutionStatus::Skipped)
+    } else {
+        let cut_path = if video_path.exists() {
+            video_path.clone()
+        } else if let Some(existing) = page_model.path.as_ref() {
+            std::path::PathBuf::from(existing)
+        } else {
+            video_path.clone()
+        };
+        let media_ready = tokio::fs::metadata(&cut_path)
+            .await
+            .map(|m| m.is_file() && m.len() > 0)
+            .unwrap_or(false);
+        let media_slot_ok = matches!(
+            &res_2,
+            Ok(ExecutionStatus::Succeeded) | Ok(ExecutionStatus::Skipped)
+        );
+        if !media_ready {
+            sponsor_cut_result = Some("none".to_string());
+            Ok(ExecutionStatus::Succeeded)
+        } else if !media_slot_ok {
+            // 媒体槽本轮未成功且文件异常：跳过，保留可重试
+            Ok(ExecutionStatus::Skipped)
+        } else {
+            let (st, code, cut_duration_secs) = run_page_sponsor_cut(
+                &cut_path,
+                &danmaku_path_for_chapters,
+                &subtitle_path_for_chapters,
+                video_model,
+                &page_info,
+                skip_sponsor_cut_for_chapters,
+            )
+            .await;
+            sponsor_cut_result = code;
+            if matches!(st, ExecutionStatus::Succeeded)
+                && matches!(
+                    sponsor_cut_result.as_deref(),
+                    Some("cut") | Some("cut_and_marked")
+                )
+            {
+                if let Ok(meta) = tokio::fs::metadata(&cut_path).await {
+                    page_file_size_bytes = Some(to_db_file_size(meta.len()));
+                }
+                if let Some(secs) = cut_duration_secs {
+                    page_duration_after_cut = Some(secs);
+                }
+            }
+            Ok(st)
+        }
+    };
+
+    let raw_results = [res_1, res_2, res_3, res_4, res_5, res_6];
     let inaccessible_reason = first_inaccessible_page_error(&raw_results).map(inaccessible_reason_from_error);
     let mut results = raw_results.into_iter().map(Into::into).collect::<Vec<_>>();
 
@@ -7562,7 +7686,7 @@ async fn download_page(
         .exec(connection)
         .await?;
 
-        status = PageStatus::from([STATUS_OK; 5]);
+        status = PageStatus::from([STATUS_OK; 6]);
         for (idx, should_run) in separate_status.iter().enumerate() {
             if *should_run {
                 results[idx] = ExecutionStatus::Skipped;
@@ -7572,11 +7696,23 @@ async fn download_page(
 
     status.update_status(&results);
 
+    // 下载 / SponsorBlock 处理在本轮完成：通知 Emby/Jellyfin（防抖合并）
+    if matches!(results[1], ExecutionStatus::Succeeded) || matches!(results[5], ExecutionStatus::Succeeded) {
+        let media_file = if video_path.exists() {
+            Some(video_path.clone())
+        } else {
+            page_model.path.as_ref().map(std::path::PathBuf::from)
+        };
+        if let Some(media_file) = media_file {
+            crate::media_server::notify_file_changed(&media_file);
+        }
+    }
+
     // 充电视频在获取详情时已经被upower字段检测并处理，无需分页级别的后期检测
 
     results
         .iter()
-        .zip(["封面", "视频", "详情", "弹幕", "字幕"])
+        .zip(["封面", "视频", "详情", "弹幕", "字幕", "剪切"])
         .for_each(|(res, task_name)| match res {
             ExecutionStatus::Skipped => debug!(
                 "处理视频「{}」第 {} 页{}已成功过，跳过",
@@ -8030,6 +8166,12 @@ async fn download_page(
     let mut page_active_model: page::ActiveModel = page_model.into();
     page_active_model.download_status = Set(status.into());
     page_active_model.path = Set(final_page_path);
+    if let Some(code) = sponsor_cut_result {
+        page_active_model.sponsor_cut_result = Set(Some(code));
+    }
+    if let Some(secs) = page_duration_after_cut {
+        page_active_model.duration = Set(secs);
+    }
     if let Some(sync_update) = danmaku_sync_update.as_ref() {
         sync_update.apply_to_active_model(&mut page_active_model);
     }
@@ -9398,7 +9540,9 @@ async fn fetch_page_video(
         .await;
 
         match download_result {
-            Ok(result) => return Ok(result),
+            Ok(result) => {
+                return Ok(result);
+            }
             Err(e)
                 if !retried_after_playurl_refresh
                     && crate::downloader::should_refresh_playurl_after_download_error(&e) =>
@@ -9664,7 +9808,7 @@ async fn preallocate_chapter_episode_plans(
         return HashMap::new();
     }
 
-    let semaphore = Arc::new(Semaphore::new(config.concurrent_limit.video));
+    let semaphore = Arc::new(Semaphore::new(config.concurrent_limit.effective_video()));
     let tasks = candidates
         .into_iter()
         .map(|(group_key, video_model, page_model, should_prefetch_chapters)| {
@@ -10136,7 +10280,7 @@ async fn sync_chapter_pages_after_split(
         return Ok(());
     }
 
-    let ok_page_status: u32 = PageStatus::from([STATUS_OK; 5]).into();
+    let ok_page_status: u32 = PageStatus::from([STATUS_OK; 6]).into();
     let chapter_count: i32 = outcome
         .files
         .len()
@@ -10181,6 +10325,7 @@ async fn sync_chapter_pages_after_split(
             audio_stream_size_bytes: Set(None),
             image: Set(source_page.image.clone()),
             download_status: Set(ok_page_status),
+            sponsor_cut_result: Set(None),
             created_at: Set(created_at),
             play_video_streams: Set(None),
             play_audio_streams: Set(None),
@@ -10519,6 +10664,7 @@ async fn remove_original_page_artifacts(
         page_path.file_stem().and_then(|value| value.to_str()),
     ) {
         let sidecar_prefix = format!("{stem}.");
+        let _ = remove_file_if_exists(&parent.join(format!(".{stem}.sponsorblock.json"))).await?;
         let mut entries = fs::read_dir(parent).await?;
         while let Some(entry) = entries.next_entry().await? {
             let path = entry.path();
@@ -10535,7 +10681,8 @@ async fn remove_original_page_artifacts(
                 .extension()
                 .and_then(|value| value.to_str())
                 .map(str::to_ascii_lowercase);
-            if matches!(ext.as_deref(), Some("srt") | Some("ass")) {
+            let is_sponsor_plan = ext.as_deref() == Some("json") && file_name.contains("sponsorblock");
+            if matches!(ext.as_deref(), Some("srt") | Some("ass") | Some("sb-orig")) || is_sponsor_plan {
                 let _ = remove_file_if_exists(&path).await?;
             }
         }
@@ -10695,6 +10842,12 @@ pub async fn fetch_page_subtitle(
                 page_info.page
             )
         })??;
+    if let Err(err) = crate::sponsorblock::sidecars::reapply_subtitles_after_write(subtitle_path).await {
+        warn!(
+            "SponsorBlock 字幕时间轴重放失败（保留已写入字幕）: 视频「{}」第 {} 页: {:#}",
+            video_model.name, page_info.page, err
+        );
+    }
     Ok(ExecutionStatus::Succeeded)
 }
 
@@ -15347,6 +15500,56 @@ fn render_single_page_base_name_from_config(video_model: &video::Model, page_mod
     crate::config::with_config(|bundle| render_single_page_base_name(bundle, video_model, page_model))
 }
 
+/// True when the last path segment of the video folder template is unique per video
+/// (title / bvid / name / avid / cid / pubtime), i.e. the folder belongs to one video.
+fn video_template_leaf_is_per_video(video_template: &str) -> bool {
+    let leaf = video_template
+        .replace('\\', "/")
+        .rsplit('/')
+        .find(|seg| !seg.trim().is_empty())
+        .unwrap_or("")
+        .to_string();
+    let leaf_wo_upper = leaf.replace("upper_name", "");
+    ["title", "bvid", "avid", "cid", "pubtime", "name"]
+        .iter()
+        .any(|k| leaf_wo_upper.contains(k))
+}
+
+/// Pick the file stem for a single-page video's files (video / thumb / fanart / nfo / subs).
+///
+/// Emby (3B1B style) wants `<folder>/<folder>.mp4`, so when the folder is this video's own
+/// folder the stem is the folder name exactly as created on disk (already sanitized, and
+/// including any dedup suffix). When the folder is shared by several videos (e.g. a flat
+/// `{{upper_name}}` template) the page template is used so files don't collide.
+fn choose_single_page_stem(
+    base_path: &std::path::Path,
+    video_model: &video::Model,
+    video_template: &str,
+    page_template_stem: impl FnOnce() -> Result<String>,
+) -> Result<String> {
+    let leaf = base_path
+        .file_name()
+        .map(|n| n.to_string_lossy().trim().to_string())
+        .filter(|n| !n.is_empty() && !n.starts_with("Season "));
+    if let Some(leaf) = leaf {
+        if video_template_leaf_is_per_video(video_template) || folder_leaf_contains_video_identity(base_path, video_model) {
+            return Ok(leaf);
+        }
+    }
+    page_template_stem()
+}
+
+fn single_page_stem_from_config(
+    base_path: &std::path::Path,
+    video_model: &video::Model,
+    page_model: &page::Model,
+) -> Result<String> {
+    let video_template = crate::config::reload_config().video_name.to_string();
+    choose_single_page_stem(base_path, video_model, &video_template, || {
+        render_single_page_base_name_from_config(video_model, page_model)
+    })
+}
+
 fn video_identity_suffix(video_model: &video::Model, pubtime: &str) -> String {
     let bvid = video_model.bvid.trim();
     if bvid.is_empty() {
@@ -15687,6 +15890,7 @@ mod tests {
             audio_stream_size_bytes: Set(None),
             image: Set(None),
             download_status: Set(download_status),
+            sponsor_cut_result: Set(None),
             created_at: Set("2026-01-01 00:00:00".to_string()),
             play_video_streams: Set(None),
             play_audio_streams: Set(None),
@@ -15710,8 +15914,8 @@ mod tests {
         insert_test_submission(&db, 2, false, false).await;
 
         let incomplete_video_status = u32::from(VideoStatus::from([STATUS_OK, 2, STATUS_OK, 4, 0]));
-        let incomplete_page_status = u32::from(PageStatus::from([STATUS_OK, 2, STATUS_OK, 4, 0]));
-        let complete_page_status = u32::from(PageStatus::from([STATUS_OK; 5]));
+        let incomplete_page_status = u32::from(PageStatus::from([STATUS_OK, 2, STATUS_OK, 4, 0, 0]));
+        let complete_page_status = u32::from(PageStatus::from([STATUS_OK; 6]));
         insert_test_video_with_status(&db, 1, 1, incomplete_video_status).await;
         insert_test_page_with_status(&db, 1, 1, incomplete_page_status).await;
         insert_test_page_with_status(&db, 2, 1, complete_page_status).await;
@@ -15768,8 +15972,8 @@ mod tests {
             [STATUS_OK, 0, STATUS_OK, 0, 0]
         );
         assert_eq!(
-            <[u32; 5]>::from(PageStatus::from(current_page.download_status)),
-            [STATUS_OK, 0, STATUS_OK, 0, 0]
+            <[u32; 6]>::from(PageStatus::from(current_page.download_status)),
+            [STATUS_OK, 0, STATUS_OK, 0, 0, 0]
         );
         assert_eq!(completed_page.download_status, complete_page_status);
         assert_eq!(unrelated_video.download_status, incomplete_video_status);
@@ -15782,7 +15986,7 @@ mod tests {
         insert_test_submission(&db, 1, false, false).await;
 
         let incomplete_video_status = u32::from(VideoStatus::from([STATUS_OK, 2, STATUS_OK, 4, 0]));
-        let incomplete_page_status = u32::from(PageStatus::from([STATUS_OK, 2, STATUS_OK, 4, 0]));
+        let incomplete_page_status = u32::from(PageStatus::from([STATUS_OK, 2, STATUS_OK, 4, 0, 0]));
         insert_test_video_with_status(&db, 1, 1, incomplete_video_status).await;
         insert_test_page_with_status(&db, 1, 1, incomplete_page_status).await;
 
@@ -15800,8 +16004,8 @@ mod tests {
             .expect("query should succeed")
             .expect("page should exist");
         assert_eq!(
-            <[u32; 5]>::from(PageStatus::from(current_page.download_status)),
-            [STATUS_OK, 0, STATUS_OK, 0, 0]
+            <[u32; 6]>::from(PageStatus::from(current_page.download_status)),
+            [STATUS_OK, 0, STATUS_OK, 0, 0, 0]
         );
     }
 
@@ -15834,7 +16038,7 @@ mod tests {
         );
 
         insert_test_video_with_status(&db, 1, 1, u32::from(VideoStatus::from([0; 5]))).await;
-        insert_test_page_with_status(&db, 1, 1, u32::from(PageStatus::from([0; 5]))).await;
+        insert_test_page_with_status(&db, 1, 1, u32::from(PageStatus::from([0; 6]))).await;
         mark_download_risk_control_resume(&video_source, &db)
             .await
             .expect("mark should succeed");
@@ -15872,7 +16076,7 @@ mod tests {
         let video_source = VideoSourceEnum::Submission(submission_source);
 
         insert_test_video_with_status(&db, 1, 1, u32::from(VideoStatus::from([0; 5]))).await;
-        insert_test_page_with_status(&db, 1, 1, u32::from(PageStatus::from([0; 5]))).await;
+        insert_test_page_with_status(&db, 1, 1, u32::from(PageStatus::from([0; 6]))).await;
         mark_download_risk_control_resume(&video_source, &db)
             .await
             .expect("mark should succeed");
@@ -15980,11 +16184,11 @@ mod tests {
 
         let incomplete_video_status = u32::from(VideoStatus::from([0; 5]));
         insert_test_video_with_status(&db, 1, 1, incomplete_video_status).await;
-        insert_test_page_with_status(&db, 1, 1, u32::from(PageStatus::from([0; 5]))).await;
-        insert_test_page_with_status(&db, 2, 1, u32::from(PageStatus::from([0; 5]))).await;
-        insert_test_page_with_status(&db, 3, 1, u32::from(PageStatus::from([0; 5]))).await;
+        insert_test_page_with_status(&db, 1, 1, u32::from(PageStatus::from([0; 6]))).await;
+        insert_test_page_with_status(&db, 2, 1, u32::from(PageStatus::from([0; 6]))).await;
+        insert_test_page_with_status(&db, 3, 1, u32::from(PageStatus::from([0; 6]))).await;
         insert_test_video_with_status(&db, 2, 2, incomplete_video_status).await;
-        insert_test_page_with_status(&db, 4, 2, u32::from(PageStatus::from([0; 5]))).await;
+        insert_test_page_with_status(&db, 4, 2, u32::from(PageStatus::from([0; 6]))).await;
 
         let submission_source = submission::Entity::find_by_id(1)
             .one(&db)
@@ -16684,6 +16888,7 @@ mod tests {
             Ok(ExecutionStatus::Skipped),
             Ok(ExecutionStatus::Skipped),
             Ok(ExecutionStatus::Skipped),
+            Ok(ExecutionStatus::Skipped),
         ];
 
         let err = first_inaccessible_page_error(&results).expect("应识别到 62012 不可访问错误");
@@ -16701,7 +16906,8 @@ mod tests {
             Ok(ExecutionStatus::Skipped),
             Ok(ExecutionStatus::Skipped),
             Ok(ExecutionStatus::Skipped),
-        ];
+        
+            Ok(ExecutionStatus::Skipped),];
 
         let err = first_inaccessible_page_error(&results).expect("应识别到 -404 不可访问错误");
         assert_eq!(inaccessible_reason_from_error(err), "已在B站删除/不可访问");
@@ -16824,6 +17030,7 @@ mod tests {
             audio_stream_size_bytes: Some(224),
             image: None,
             download_status: 7,
+            sponsor_cut_result: None,
             created_at: "2026-04-06 00:00:00".to_string(),
             play_video_streams: None,
             play_audio_streams: None,
@@ -17318,4 +17525,80 @@ mod tests {
     }
 
     // 旧的87007/87008错误检测测试已清理，现在使用革命性的upower字段检测
+}
+
+
+/// Whether a single-page submission inside a UGC season uses episode names
+/// (`S01E27 - title`). Only `up_seasonal` groups those videos into season
+/// folders; otherwise each video sits in its own folder and keeps the plain
+/// single-page name so video, subs, danmaku, nfo and art share one stem.
+fn submission_collection_uses_episode_names(is_up_seasonal: bool) -> bool {
+    is_up_seasonal
+}
+
+#[cfg(test)]
+mod submission_collection_naming_tests {
+    use super::submission_collection_uses_episode_names;
+
+    #[test]
+    fn only_up_seasonal_uses_episode_names() {
+        assert!(submission_collection_uses_episode_names(true));
+        assert!(!submission_collection_uses_episode_names(false));
+    }
+}
+
+#[cfg(test)]
+mod single_page_stem_tests {
+    use super::{choose_single_page_stem, video_template_leaf_is_per_video};
+    use std::path::Path;
+
+    fn model() -> bili_sync_entity::video::Model {
+        let mut m = bili_sync_entity::video::Model::default();
+        m.bvid = "BV1xx411c7mD".into();
+        m
+    }
+
+    #[test]
+    fn per_video_leaf_detection() {
+        assert!(video_template_leaf_is_per_video("{{upper_name}}/{{title}}"));
+        assert!(video_template_leaf_is_per_video("{{title}}"));
+        assert!(video_template_leaf_is_per_video("{{upper_name}}/{{bvid}}"));
+        assert!(video_template_leaf_is_per_video("{{upper_name}}-{{title}}"));
+        assert!(!video_template_leaf_is_per_video("{{upper_name}}"));
+        assert!(!video_template_leaf_is_per_video("{{title}}/{{upper_name}}"));
+    }
+
+    #[test]
+    fn single_page_stem_equals_folder_name() {
+        let m = model();
+        let base = Path::new("/bili-sync/3Blue1Brown/线性代数的本质 - 01 - 向量究竟是什么？");
+        let stem = choose_single_page_stem(base, &m, "{{upper_name}}/{{title}}", || Ok("20240101120000-BV1xx411c7mD".into()))
+            .unwrap();
+        assert_eq!(stem, "线性代数的本质 - 01 - 向量究竟是什么？");
+        let base = Path::new("/bili-sync/UP/标题-20240101120000-BV1xx411c7mD");
+        assert_eq!(
+            choose_single_page_stem(base, &m, "{{upper_name}}/{{title}}", || Ok("x".into())).unwrap(),
+            "标题-20240101120000-BV1xx411c7mD"
+        );
+    }
+
+    #[test]
+    fn shared_folder_falls_back_to_page_template() {
+        let m = model();
+        let base = Path::new("/bili-sync/某UP");
+        assert_eq!(
+            choose_single_page_stem(base, &m, "{{upper_name}}", || Ok("page-stem".into())).unwrap(),
+            "page-stem"
+        );
+        let base = Path::new("/bili-sync/某UP-BV1xx411c7mD");
+        assert_eq!(
+            choose_single_page_stem(base, &m, "{{upper_name}}", || Ok("page-stem".into())).unwrap(),
+            "某UP-BV1xx411c7mD"
+        );
+        let base = Path::new("/bili-sync/合集/Season 1");
+        assert_eq!(
+            choose_single_page_stem(base, &m, "{{title}}", || Ok("page-stem".into())).unwrap(),
+            "page-stem"
+        );
+    }
 }

@@ -19,7 +19,7 @@ pub use crate::config::global::{
     CONFIG_BUNDLE, CONFIG_DIR,
 };
 use crate::config::item::ConcurrentLimit;
-pub use crate::config::item::{
+pub use crate::config::item::{clamp_media_concurrency, MAX_MEDIA_CONCURRENCY, 
     DanmakuUpdatePolicy, EmptyUpperStrategy, NFOConfig, NFOTimeType, PathSafeTemplate, RateLimit,
     SubmissionRiskControlConfig, SubmissionScanStrategyConfig,
 };
@@ -268,6 +268,13 @@ pub struct Config {
     // 风控验证配置
     #[serde(default)]
     pub risk_control: RiskControlConfig,
+
+    /// BilibiliSponsorBlock 风格裁剪 / 章节标记（仅 B 站分页下载路径）
+    #[serde(default)]
+    pub sponsor_block: SponsorBlockConfig,
+    /// 下载完成后通知 Emby / Jellyfin 扫描
+    #[serde(default)]
+    pub media_server: MediaServerConfig,
 
     /// AI 自动重命名配置（OpenAI 兼容接口）
     #[serde(default)]
@@ -550,6 +557,177 @@ impl NotificationConfig {
     }
 }
 
+
+/// BilibiliSponsorBlock 裁剪配置（本地审计扩展，非上游正式发布字段）。
+///
+/// API: https://github.com/hanydd/BilibiliSponsorBlock/wiki/API
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct SponsorBlockConfig {
+    /// 总开关（默认关闭）
+    #[serde(default = "default_sponsor_block_enabled")]
+    pub enabled: bool,
+    /// 主服务器
+    #[serde(default = "default_sponsor_block_server")]
+    pub server_address: String,
+    /// 镜像服务器列表
+    #[serde(default = "default_sponsor_block_mirrors")]
+    pub mirror_server_addresses: Vec<String>,
+    /// 要裁剪的类别（默认保守：sponsor + padding）
+    #[serde(default = "default_sponsor_block_categories")]
+    pub categories: Vec<String>,
+    /// 章节标记类别（嵌入 Matroska/MP4 chapters，供 Emby/Jellyfin 时间轴手动跳过；默认空）
+    #[serde(default = "default_sponsor_block_mark_categories")]
+    pub mark_categories: Vec<String>,
+    /// 动作类型（MVP 仅处理 skip）
+    #[serde(default = "default_sponsor_block_action_types")]
+    pub action_types: Vec<String>,
+    /// 裁剪模式："keyframe"（默认，流复制，切点吸附到最近关键帧，误差 ≤ 半个 GOP）
+    /// 或 "accurate"（重新编码视频，切点精确到帧，耗 CPU）。
+    /// 旧配置里的 keep_original / original_suffix 已移除，反序列化时会被忽略。
+    #[serde(default = "default_sponsor_block_cut_mode")]
+    pub cut_mode: String,
+    /// 最短可裁剪片段（秒）
+    #[serde(default = "default_sponsor_block_min_segment")]
+    pub min_segment_seconds: f64,
+    /// 最短保留间隙（秒），更短的 keep 片段会被吸收进删除区
+    #[serde(default = "default_sponsor_block_min_keep_gap")]
+    pub min_keep_gap_seconds: f64,
+    /// API 超时（毫秒）
+    #[serde(default = "default_sponsor_block_api_timeout")]
+    pub api_timeout_ms: u64,
+    /// API/ffmpeg 失败时保留原片并仅告警
+    #[serde(default = "default_sponsor_block_fail_open")]
+    pub fail_open: bool,
+    /// Background heartbeat interval (seconds). Default 300; 0 = disable periodic.
+    /// Initial probe still runs on startup when enabled.
+    #[serde(default = "default_sponsor_block_heartbeat_interval")]
+    pub heartbeat_interval_secs: u64,
+}
+
+fn default_sponsor_block_enabled() -> bool {
+    false
+}
+
+fn default_sponsor_block_server() -> String {
+    "https://www.bsbsb.top".to_string()
+}
+
+fn default_sponsor_block_mirrors() -> Vec<String> {
+    vec!["https://www.bsbsb.xyz".to_string()]
+}
+
+fn default_sponsor_block_categories() -> Vec<String> {
+    vec!["sponsor".to_string(), "padding".to_string()]
+}
+
+fn default_sponsor_block_mark_categories() -> Vec<String> {
+    Vec::new()
+}
+
+fn default_sponsor_block_action_types() -> Vec<String> {
+    vec!["skip".to_string()]
+}
+
+fn default_sponsor_block_cut_mode() -> String {
+    "keyframe".to_string()
+}
+
+fn default_sponsor_block_min_segment() -> f64 {
+    0.5
+}
+
+fn default_sponsor_block_min_keep_gap() -> f64 {
+    0.3
+}
+
+fn default_sponsor_block_api_timeout() -> u64 {
+    10000
+}
+
+fn default_sponsor_block_fail_open() -> bool {
+    true
+}
+
+fn default_sponsor_block_heartbeat_interval() -> u64 {
+    300
+}
+
+impl Default for SponsorBlockConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_sponsor_block_enabled(),
+            server_address: default_sponsor_block_server(),
+            mirror_server_addresses: default_sponsor_block_mirrors(),
+            categories: default_sponsor_block_categories(),
+            mark_categories: default_sponsor_block_mark_categories(),
+            action_types: default_sponsor_block_action_types(),
+            cut_mode: default_sponsor_block_cut_mode(),
+            min_segment_seconds: default_sponsor_block_min_segment(),
+            min_keep_gap_seconds: default_sponsor_block_min_keep_gap(),
+            api_timeout_ms: default_sponsor_block_api_timeout(),
+            fail_open: default_sponsor_block_fail_open(),
+            heartbeat_interval_secs: default_sponsor_block_heartbeat_interval(),
+        }
+    }
+}
+
+/// 路径映射：本容器内路径前缀 -> 媒体服务器看到的路径前缀
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, utoipa::ToSchema)]
+pub struct PathMapping {
+    #[serde(default)]
+    pub from: String,
+    #[serde(default)]
+    pub to: String,
+}
+
+/// 下载完成后通知 Emby / Jellyfin 扫描（参考 MoviePilot MediaServerRefresh）
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct MediaServerConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// "emby" 或 "jellyfin"（两者 API 相同，仅用于日志/界面）
+    #[serde(default = "default_media_server_type")]
+    pub server_type: String,
+    /// 例如 http://<NAS_IP>:8096
+    #[serde(default)]
+    pub url: String,
+    /// API 密钥（敏感，接口只返回是否已设置）
+    #[serde(default)]
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub path_mappings: Vec<PathMapping>,
+    /// 整轮下载（含 SponsorBlock 裁剪）全部结束后再等待的秒数，然后一次性通知
+    #[serde(default = "default_media_server_delay")]
+    pub delay_seconds: u64,
+    /// 定向扫描失败时回退全库扫描
+    #[serde(default = "default_true_ms")]
+    pub fallback_full_refresh: bool,
+}
+
+fn default_media_server_type() -> String {
+    "emby".to_string()
+}
+fn default_media_server_delay() -> u64 {
+    300
+}
+fn default_true_ms() -> bool {
+    true
+}
+
+impl Default for MediaServerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            server_type: default_media_server_type(),
+            url: String::new(),
+            api_key: None,
+            path_mappings: Vec::new(),
+            delay_seconds: default_media_server_delay(),
+            fallback_full_refresh: true,
+        }
+    }
+}
+
 // 风控验证配置结构体
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct RiskControlConfig {
@@ -731,6 +909,8 @@ impl Clone for Config {
             enable_startup_data_fix: self.enable_startup_data_fix,
             enable_cid_population: self.enable_cid_population,
             risk_control: self.risk_control.clone(),
+            sponsor_block: self.sponsor_block.clone(),
+            media_server: self.media_server.clone(),
             ai_rename: self.ai_rename.clone(),
         }
     }
@@ -785,6 +965,8 @@ impl Default for Config {
             enable_startup_data_fix: false, // 默认关闭，减少不必要的日志
             enable_cid_population: false,   // 默认关闭，减少不必要的日志
             risk_control: RiskControlConfig::default(),
+            sponsor_block: SponsorBlockConfig::default(),
+            media_server: MediaServerConfig::default(),
             ai_rename: crate::utils::ai_rename::AiRenameConfig::default(),
         }
     }

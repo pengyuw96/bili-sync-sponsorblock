@@ -10,7 +10,7 @@ use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::SimpleExpr;
 use sea_orm::{ActiveModelTrait, Condition, QueryFilter, QuerySelect, Set};
 use tokio_util::sync::CancellationToken;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::bilibili::{parse_event_name, DanmakuElem, DanmakuWriter, Dimension, PageInfo as BiliPageInfo, Video};
 use crate::config::Config;
@@ -501,6 +501,13 @@ pub async fn sync_page_danmaku(
         fetched_danmaku_count
     };
 
+    if let Err(err) = crate::sponsorblock::sidecars::reapply_danmaku_after_write(danmaku_path).await {
+        warn!(
+            "SponsorBlock 弹幕时间轴重放失败（保留已写入弹幕）: 视频「{}」第 {} 页: {:#}",
+            video_model.name, fresh.page, err
+        );
+    }
+
     let now_str = to_standard_string(now.with_timezone(&beijing_timezone()));
     info!(
         "视频「{}」({}) 分页 pid={} 弹幕已刷新 -> 阶段={}",
@@ -811,6 +818,7 @@ mod tests {
             audio_stream_size_bytes: Set(Some(789)),
             image: Set(None),
             download_status: Set(completed_page_status()),
+            sponsor_cut_result: Set(None),
             created_at: Set("2026-04-15 00:00:00".to_string()),
             play_video_streams: Set(Some("[\"cached-video\"]".to_string())),
             play_audio_streams: Set(Some("[\"cached-audio\"]".to_string())),

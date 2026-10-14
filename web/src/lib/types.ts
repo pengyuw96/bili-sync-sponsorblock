@@ -338,6 +338,8 @@ export interface VideoInfo {
 	path: string;
 	category: number;
 	download_status: [number, number, number, number, number];
+	/** 派生的第 6 阶段「广告剪辑」：各分P「视频剪切」槽位的最小值（仅 B 站视频） */
+	sponsor_cut_status?: number;
 	cover: string;
 	valid: boolean;
 	is_charge_video: boolean;
@@ -363,7 +365,8 @@ export interface PageInfo {
 	id: number;
 	pid: number;
 	name: string;
-	download_status: [number, number, number, number, number];
+	download_status: number[]; // B站 6 槽；外源仍为 5
+	sponsor_cut_result?: string | null;
 	path?: string;
 	danmaku_last_synced_at?: string;
 	danmaku_sync_generation: number;
@@ -681,8 +684,27 @@ export interface ConfigResponse {
 	};
 	// AI重命名配置
 	ai_rename?: AiRenameConfig;
+	// SponsorBlock 裁剪配置
+	sponsor_block?: SponsorBlockConfig;
+	// Emby/Jellyfin 扫描通知
+	media_server?: MediaServerConfig;
 	// 服务器绑定地址
 	bind_address: string;
+}
+
+export interface MediaServerPathMapping {
+	from: string;
+	to: string;
+}
+
+export interface MediaServerConfig {
+	enabled: boolean;
+	server_type: string;
+	url: string;
+	api_key_set: boolean;
+	path_mappings: MediaServerPathMapping[];
+	delay_seconds: number;
+	fallback_full_refresh: boolean;
 }
 
 export interface FilenamePreviewRequest {
@@ -730,6 +752,40 @@ export interface AiRenameConfig {
 	video_prompt_hint: string;
 	audio_prompt_hint: string;
 	rename_parent_dir: boolean;
+}
+
+// SponsorBlock 裁剪配置类型
+export interface SponsorBlockConfig {
+	enabled: boolean;
+	server_address: string;
+	mirror_server_addresses: string[];
+	categories: string[];
+	mark_categories: string[];
+	action_types: string[];
+	cut_mode: string;
+	min_segment_seconds: number;
+	min_keep_gap_seconds: number;
+	api_timeout_ms: number;
+	fail_open: boolean;
+	last_ok?: boolean;
+	checked_at?: string;
+	heartbeat_interval_secs?: number;
+}
+
+export interface SponsorBlockServerHealth {
+	url: string;
+	ok: boolean;
+	latency_ms: number;
+	status_code?: number;
+	error?: string;
+	uptime?: number;
+	hostname?: string;
+}
+
+export interface SponsorBlockHealthResponse {
+	servers: SponsorBlockServerHealth[];
+	last_ok: boolean;
+	checked_at: string;
 }
 
 // 更新配置请求类型
@@ -864,6 +920,23 @@ export interface UpdateConfigRequest {
 	ai_rename_video_prompt_hint?: string;
 	ai_rename_audio_prompt_hint?: string;
 	ai_rename_rename_parent_dir?: boolean;
+	// SponsorBlock 裁剪配置
+	sponsor_block_enabled?: boolean;
+	sponsor_block_server_address?: string;
+	sponsor_block_mirror_server_addresses?: string[];
+	sponsor_block_categories?: string[];
+	sponsor_block_mark_categories?: string[];
+	sponsor_block_cut_mode?: string;
+	sponsor_block_fail_open?: boolean;
+	// Emby/Jellyfin 扫描通知
+	media_server_enabled?: boolean;
+	media_server_type?: string;
+	media_server_url?: string;
+	media_server_api_key?: string;
+	media_server_clear_api_key?: boolean;
+	media_server_path_mappings?: MediaServerPathMapping[];
+	media_server_delay_seconds?: number;
+	media_server_fallback_full_refresh?: boolean;
 	// 服务器绑定地址
 	bind_address?: string;
 }

@@ -102,6 +102,7 @@
 	let resetTaskInfo = false;
 	let resetTaskDanmaku = false;
 	let resetTaskSubtitle = false;
+	let resetTaskSponsorCut = false;
 
 	// 筛选状态
 	let showFilters = false;
@@ -756,7 +757,7 @@
 
 				// 后端状态定义：
 				// VideoStatus: [视频封面(0), tvshow/season.nfo(1), UP主头像(2), UP主信息(3), 分P下载(4)]
-				// PageStatus: [视频封面(0), 视频内容(1), 单集NFO(2), 视频弹幕(3), 视频字幕(4)]
+				// PageStatus: [视频封面(0), 视频内容(1), 单集NFO(2), 视频弹幕(3), 视频字幕(4), 视频剪切(5)]
 				if (resetTaskPages) {
 					videoTaskIndexes.push(0);
 					pageTaskIndexes.push(0);
@@ -771,6 +772,7 @@
 					pageTaskIndexes.push(3);
 				}
 				if (resetTaskSubtitle) pageTaskIndexes.push(4);
+				if (resetTaskSponsorCut) pageTaskIndexes.push(5);
 
 				const uniqueVideoTaskIndexes = [...new Set(videoTaskIndexes)];
 				const uniquePageTaskIndexes = [...new Set(pageTaskIndexes)];
@@ -909,6 +911,7 @@
 			resetTaskInfo = false;
 			resetTaskDanmaku = false;
 			resetTaskSubtitle = false;
+			resetTaskSponsorCut = false;
 		}
 	}
 
@@ -918,7 +921,8 @@
 			resetTaskVideo ||
 			resetTaskInfo ||
 			resetTaskDanmaku ||
-			resetTaskSubtitle
+			resetTaskSubtitle ||
+			resetTaskSponsorCut
 		) {
 			resetAllTasks = false;
 		}
@@ -1614,6 +1618,17 @@
 							class="rounded border-gray-300"
 						/>
 						<span class="text-sm">重置视频字幕</span>
+					</label>
+
+					<label class="flex items-center gap-2">
+						<input
+							type="checkbox"
+							bind:checked={resetTaskSponsorCut}
+							onchange={handleSpecificTaskChange}
+							disabled={resetAllTasks}
+							class="rounded border-gray-300"
+						/>
+						<span class="text-sm">重置视频剪切（B站 SponsorBlock）</span>
 					</label>
 				</div>
 

@@ -134,6 +134,38 @@
 	let audioOnlyM4aOnly = false; // 仅音频时只保留m4a（不下载封面/nfo/弹幕/字幕）
 	let flatFolder = false; // 平铺目录模式
 	let splitChaptersAfterDownload = false; // 下载后按播放器章节切分为独立视频
+	// SponsorBlock 广告剪辑（全局配置 sponsor_block.enabled，切换即保存）
+	let sponsorBlockEnabled = false;
+	let sponsorBlockLoaded = false;
+	let sponsorBlockSaving = false;
+
+	async function loadSponsorBlockEnabled() {
+		try {
+			const res = await api.getConfig();
+			sponsorBlockEnabled = res.data?.sponsor_block?.enabled ?? false;
+			sponsorBlockLoaded = true;
+		} catch {
+			sponsorBlockLoaded = false;
+		}
+	}
+
+	async function toggleSponsorBlock(next: boolean) {
+		const prev = sponsorBlockEnabled;
+		sponsorBlockEnabled = next;
+		sponsorBlockSaving = true;
+		try {
+			const res = await api.updateConfig({ sponsor_block_enabled: next });
+			if (!res.data?.success) throw new Error(res.data?.message || '保存失败');
+			toast.success(next ? '已启用 SponsorBlock 广告剪辑' : '已关闭 SponsorBlock 广告剪辑', {
+				description: '全局设置，对所有 B 站视频源生效'
+			});
+		} catch (e) {
+			sponsorBlockEnabled = prev;
+			toast.error('保存 SponsorBlock 开关失败', { description: String((e as Error)?.message ?? e) });
+		} finally {
+			sponsorBlockSaving = false;
+		}
+	}
 	let downloadChargeVideos = true; // 下载充电视频（默认开启）
 	let downloadDanmaku = true; // 下载弹幕（默认开启）
 	let downloadSubtitle = true; // 下载字幕（默认开启）
@@ -298,7 +330,7 @@
 	type BatchSelectedItem = { type: string; data: any; name: string };
 	let batchSelectedItems = new Map<string, BatchSelectedItem>(); // 存储选中项 {key: {type, data, name}}
 	let batchCheckboxStates: Record<string, boolean> = {}; // 存储checkbox状态的响应式对象
-	let batchBasePath = '/Downloads'; // 批量基础路径
+	let batchBasePath = '/bili-sync'; // 批量基础路径
 	let batchCollectionAggregateEnabled = false; // 批量添加合集时是否启用合集聚合
 	let batchAdding = false; // 批量添加进行中
 	let batchProgress = { current: 0, total: 0 }; // 批量添加进度
@@ -758,6 +790,7 @@
 	}
 
 	onMount(async () => {
+		void loadSponsorBlockEnabled();
 		const requestedPlatform = $page.url.searchParams.get('platform');
 		sourcePlatform =
 			requestedPlatform === 'youtube'
@@ -1873,7 +1906,7 @@
 			sourceId = '';
 			upId = '';
 			name = '';
-			path = '/Downloads';
+			path = '/bili-sync';
 			lastAutoAppliedPath = '';
 			downloadAllSeasons = false;
 			collectionType = 'season';
@@ -3552,8 +3585,8 @@
 
 	function openBatchDialog() {
 		const defaultTemplate = batchSelectedTemplate;
-		if (!batchBasePath.trim() || batchBasePath === '/Downloads') {
-			batchBasePath = defaultTemplate || '/Downloads';
+		if (!batchBasePath.trim() || batchBasePath === '/bili-sync') {
+			batchBasePath = defaultTemplate || '/bili-sync';
 		}
 		batchDialogOpen = true;
 	}
@@ -4815,6 +4848,56 @@
 										/>
 										<div
 											class="peer h-5 w-9 rounded-full bg-gray-300 peer-checked:bg-emerald-600 peer-focus:ring-2 peer-focus:ring-emerald-500 peer-focus:outline-none after:absolute after:top-[2px] after:left-[2px] after:h-4 after:w-4 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white dark:bg-gray-600 dark:peer-checked:bg-emerald-500"
+										></div>
+									</label>
+								</div>
+
+								<!-- SponsorBlock 广告剪辑（全局） -->
+								<div
+									class="flex items-center justify-between rounded-md border border-gray-200 bg-white px-3 py-2 dark:border-gray-600 dark:bg-gray-700"
+								>
+									<div class="flex items-center gap-2">
+										<svg
+											class="h-4 w-4 text-orange-600 dark:text-orange-400"
+											fill="none"
+											stroke="currentColor"
+											viewBox="0 0 24 24"
+										>
+											<path
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												stroke-width="2"
+												d="M14.121 14.121L19 19m-7-7l7-7m-7 7l-2.879 2.879M12 12L9.121 9.121m0 5.758a3 3 0 10-4.243 4.243 3 3 0 004.243-4.243zm0-5.758a3 3 0 10-4.243-4.243 3 3 0 004.243 4.243z"
+											/>
+										</svg>
+										<div>
+											<span class="text-xs font-medium text-gray-700 dark:text-gray-300"
+												>启用 SponsorBlock 广告剪辑</span
+											>
+											<p class="text-[10px] text-gray-500 dark:text-gray-400">
+												下载完成后按 BilibiliSponsorBlock 片段剪掉广告并对齐字幕弹幕
+											</p>
+											{#if splitChaptersAfterDownload}
+												<p class="text-[10px] text-amber-600 dark:text-amber-400">
+													已开启「分章下载」：该视频源会跳过广告剪辑（两者互斥）
+												</p>
+											{:else}
+												<p class="text-[10px] text-gray-400 dark:text-gray-500">
+													全局开关，切换即保存；类别、模式等详细设置在「设置 → SponsorBlock」
+												</p>
+											{/if}
+										</div>
+									</div>
+									<label class="relative inline-flex cursor-pointer items-center">
+										<input
+											type="checkbox"
+											checked={sponsorBlockEnabled}
+											disabled={!sponsorBlockLoaded || sponsorBlockSaving}
+											onchange={(e) => toggleSponsorBlock(e.currentTarget.checked)}
+											class="peer sr-only"
+										/>
+										<div
+											class="peer h-5 w-9 rounded-full bg-gray-300 peer-checked:bg-orange-600 peer-focus:ring-2 peer-focus:ring-orange-500 peer-focus:outline-none peer-disabled:cursor-not-allowed after:absolute after:top-[2px] after:left-[2px] after:h-4 after:w-4 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white dark:bg-gray-600 dark:peer-checked:bg-orange-500"
 										></div>
 									</label>
 								</div>
@@ -7318,7 +7401,7 @@
 					<Input
 						id="batch-base-path"
 						bind:value={batchBasePath}
-						placeholder={batchSelectedTemplate || '/Downloads'}
+						placeholder={batchSelectedTemplate || '/bili-sync'}
 						class="mt-1"
 					/>
 					{#if batchSelectedTemplate}

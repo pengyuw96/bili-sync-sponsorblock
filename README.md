@@ -1,158 +1,89 @@
-# bili-sync
+# bili-sync-sponsorblock
 
-![bili-sync](https://socialify.git.ci/NeeYoonc/bili-sync-up/image?custom_description=%E7%94%B1%20Rust%20%26%20Tokio%20%E9%A9%B1%E5%8A%A8%E7%9A%84%E5%93%94%E5%93%A9%E5%93%94%E5%93%A9%E5%90%8C%E6%AD%A5%E5%B7%A5%E5%85%B7%EF%BC%88%E5%8D%87%E7%BA%A7%E4%BC%98%E5%8C%96%E7%89%88%EF%BC%89&description=1&font=KoHo&issues=1&language=1&logo=https%3A%2F%2Fs2.loli.net%2F2023%2F12%2F02%2F9EwT2yInOu1d3zm.png&name=1&owner=1&pattern=Signal&pulls=1&stargazers=1&theme=Light)
+基于 [NeeYoonc/bili-sync-up](https://github.com/NeeYoonc/bili-sync-up)（上游 [amtoaer/bili-sync](https://github.com/amtoaer/bili-sync)）的社区 fork，主要加入 [BilibiliSponsorBlock](https://github.com/hanydd/BilibiliSponsorBlock) 广告片段剪辑，并针对 Emby / Jellyfin 媒体库做了适配。
 
-[![GitHub Release](https://img.shields.io/github/v/release/NeeYoonc/bili-sync-up)](https://github.com/NeeYoonc/bili-sync-up/releases/latest)
-[![Build](https://github.com/NeeYoonc/bili-sync-up/actions/workflows/build.yml/badge.svg)](https://github.com/NeeYoonc/bili-sync-up/actions/workflows/build.yml)
-[![Docker Build](https://github.com/NeeYoonc/bili-sync-up/actions/workflows/docker-build.yml/badge.svg)](https://github.com/NeeYoonc/bili-sync-up/actions/workflows/docker-build.yml)
-[![Downloads](https://img.shields.io/github/downloads/NeeYoonc/bili-sync-up/total)](https://github.com/NeeYoonc/bili-sync-up/releases)
+- 当前版本：**v3.1.4.6**（Cargo 包版本号为 `3.1.4`，Cargo 不支持四段版本号）
+- 上游代码基线：bili-sync-up **v3.1.3**（`f5a91a97`）
+- 非官方版本，问题请勿反馈到上游。
 
-专为 NAS 用户打造的哔哩哔哩同步工具，基于 Rust & Tokio 构建。
+## 一、SponsorBlock 剪辑（核心功能）
 
-📚 [在线文档](https://NeeYoonc.github.io/bili-sync-up/) | 🚀 [快速开始](#快速开始) | 📝 [更新日志](./docs/changelog.md) | 💬 [QQ群交流](https://qm.qq.com/q/144RN3oaLM)
+视频下载合并完成后，如果开启了 `sponsor_block.enabled`，会按下面的流程处理：
 
-## ✨ 核心特性
+1. **获取片段**：用 BV 号和 cid 请求 BilibiliSponsorBlock API `/api/skipSegments`，默认服务器是 `bsbsb.top`，失败时用镜像 `bsbsb.xyz`。只处理 `actionType = skip` 且类别在配置里的片段。
+2. **计算保留区间**：合并重叠的删除区间，取反得到要保留的区间；太短的片段（`min_segment_seconds`）和太短的保留间隙（`min_keep_gap_seconds`）会被忽略或并入删除区间。
+3. **ffmpeg 剪辑**，有两种模式：
+   - `cut_mode = keyframe`（默认）：流复制，不重新编码，速度快、画质无损。每段保留区间的起点会**吸附到它之前最近的关键帧**，这与 ffmpeg 在 `-c copy` 下的实际行为一致。
+   - `cut_mode = accurate`：用 libx264/aac 重新编码，切点精确到帧，但很耗 CPU。失败时会回退到 keyframe 模式。
+   - 剪完后原子替换原文件，**不再保留未剪辑的原片**（旧版本的 `*.sb-orig` / `*.sponsor-original.*` 不再生成）。
+4. **字幕和弹幕同步对齐**：字幕（srt/ass）和弹幕（ass）使用和视频**同一组吸附后的删除区间**来平移时间轴，所以音画、字幕、弹幕都在同一条时间线上。每个文件只平移一次。剪辑计划记录在隐藏文件 `.{文件名}.sponsorblock.json` 里，之后刷新弹幕或重写字幕时不会被重复平移。
+5. **时长修正**：剪辑后用 ffprobe 测量实际时长，并据此更新章节结束时间、同名 NFO 的 `<runtime>` 和数据库里的分 P 时长。
+6. **章节标记（可选）**：`mark_categories` 里的类别不剪辑，而是写成 MP4/MKV 章节（使用中文标题），同时在字幕和弹幕中插入 `〔SB〕` 提示，方便在 Emby/Jellyfin 里手动跳到下一章节。同一类别如果同时出现在剪辑和标记里，以剪辑为准。
+7. **容错**：默认 `fail_open`，API 或 ffmpeg 出错时保留原下载文件，只记日志。视频源开启了「按章节拆分」时会跳过 SponsorBlock 处理。
 
-### 🚀可直接原项目迁移运行
-- **迁移后只需调整个别功能设置**
+**为什么剪完后可能还残留约 1 秒？** keyframe 模式不重新编码，流复制只能从关键帧开始切。B 站视频的关键帧间隔（GOP）一般在 1～数秒，剪辑起点会被提前到上一个关键帧，所以广告结束处可能多留不到一个 GOP 的画面。如果介意，可以改用 `accurate` 模式。字幕和弹幕按吸附后的实际切点对齐，不会因此错位。
 
-### 🎯 智能化功能
-- **充电视频智能识别** - 自动检测并处理充电专享视频，无需人工干预
-- **失败任务智能筛选** - 一键筛选失败任务，快速定位问题
-- **任务队列持久化** - 程序重启后自动恢复任务状态
-- **配置热重载** - 修改配置立即生效，无需重启
+**界面与接口：**
 
-### 🎬 视频源支持
-- **收藏夹** - 直接显示用户所有收藏夹，支持快速选择
-- **UP主投稿** - 输入UP主ID查看所有合集/系列
-- **稍后再看** - 自动同步稍后再看列表
-- **番剧下载** - 支持单季和全季下载模式
+- Web 设置页可以开关 SponsorBlock、选择类别和模式，并检测服务器状态（心跳接口 `GET /api/sponsorblock/health`，默认每 300 秒检测一次）。
+- 分 P 状态新增第 6 位「视频剪切」，详情页会显示剪辑结果（`cut` / `none` / `marked` / `failed_open` 等）。数据库迁移会让已有媒体库只补跑这一步。
+- 目前只处理 B 站视频，YouTube / 抖音等外部来源不受影响。
 
-### 🚀 技术优势
-- **高性能** - Rust + Tokio 异步架构，支持高并发
-- **内存优化** - 智能内存数据库模式，提升扫描性能
-- **Web管理** - 友好的 Web 界面，无需命令行操作
-- **自动重试** - 智能错误处理和重试机制
+## 二、Emby / Jellyfin 适配
 
-## 🚀 快速开始
+- **单 P 视频统一文件名**：视频、`-thumb`、`-fanart`、NFO、字幕、弹幕都用文件夹名作为文件名（和 3Blue1Brown 这类目录的结构一致），这样 Emby 能正确显示封面。同时修复了文件夹图片文件名为空的问题。
+- **下载完成后通知扫库**（参考 MoviePilot / Sonarr 的实现）：
+  - 一整轮下载（包括 SponsorBlock 剪辑）全部结束后，再等待 `delay_seconds`（默认 300 秒），然后**只通知一次**。如果等待期间又开始了新一轮，会继续顺延。
+  - 优先定向扫描：`POST /Library/Media/Updated`；失败时可回退到全库扫描 `POST /Library/Refresh`（`fallback_full_refresh`）。
+  - 支持路径映射，按最长前缀把容器内路径（如 `/bili-sync/...`）转换成媒体服务器看到的路径。套件版 Emby 填 NAS 上的真实路径即可。
+  - API Key 只放在 `X-Emby-Token` 请求头里，不写入日志，接口也只返回「是否已设置」。
 
-### 使用 Docker（推荐）
+## 三、其他改动
 
-```bash
-docker run -d \
-  --name bili-sync \
-  -p 12345:12345 \
-  -v ./data:/data \
-  qq1582185982/bili-sync:latest
+- **并发**：视频处理并发数默认 1，限制在 1～2 之间，避免 NAS 上 ffmpeg 抢占资源。
+- **开箱即用的单一挂载**：媒体目录只需要挂载到容器内的 `/bili-sync`。
+- **仓库精简**：删除了上游的 Docker、compose、CI、文档站和截图资源，只保留完整源码，需要自己编译。不发布 Release。
+
+## 编译
+
+```sh
+cd web && npm ci && npm run build && cd ..
+cargo build --release --target x86_64-unknown-linux-musl -p bili_sync
+tar czf bili-sync-rs-Linux-x86_64-musl.tar.gz -C target/x86_64-unknown-linux-musl/release bili-sync-rs
 ```
 
-### docker-compose
-```yaml
-services:
+## 部署（Docker / 威联通）
 
-  bili-sync:
-    image: docker.cnb.cool/sviplk.com/docker/bili-sync:latest
-    # build:
-    #   context: .
-    #   dockerfile: Dockerfile
-    restart: unless-stopped
-    network_mode: bridge
-    # 该选项请仅在日志终端支持彩色输出时启用，否则日志中可能会出现乱码
-    tty: false
-    # 非必需设置项，推荐设置为宿主机用户的 uid 及 gid (`$uid:$gid`)
-    # 可以执行 `id ${user}` 获取 `user` 用户的 uid 及 gid
-    # 程序下载的所有文件权限将与此处的用户保持一致，不设置默认为 Root
-    # user: 1000:1000
-    hostname: bili-sync
-    container_name: bili-sync
-    # 程序默认绑定 0.0.0.0:12345 运行 http 服务
-    ports:
-      - 12345:12345
-    volumes:
-      - /volume1/Cloudreve/OD/20/config:/app/.config/bili-sync
-      - /volume1/Cloudreve/OD/20:/Downloads #下载目录 在前端直接/Downloads就是下载到/volume1/Cloudreve/OD/20
+1. 把上面打包好的 tarball 放到 `Dockerfile.qnap` 同一目录，把 `Dockerfile.qnap` 重命名为 `Dockerfile` 后构建镜像。镜像基于 Alpine 3.22，自带 ffmpeg。
+2. 参考 `deploy/docker-compose.nas.yml` 运行容器：
+   - 媒体目录 → `/bili-sync`（Web 界面里的路径都写 `/bili-sync/...`）
+   - 配置目录 → `/app/.config/bili-sync`
+   - 端口 `12345`，建议用媒体用户运行（`user: uid:gid`）
+3. `deploy/` 里的辅助脚本默认只做演练（dry-run），加参数才会真正执行：
+   - `cleanup-sb-orig.sh <目录> [--delete]`：清理旧版本留下的未剪辑原片
+   - `migrate-episode-names.sh <宿主目录> <宿主根> <容器根> [--apply]`：把旧的 `S01E27 - 标题.*` 单 P 文件改为统一文件名，并生成更新数据库路径的 SQL
 
-    environment:
-      - TZ=Asia/Shanghai
-      - RUST_LOG=None,bili_sync=info
-      # 可选：设置执行周期，默认为每天凌晨3点执行
-      # - BILI_SYNC_SCHEDULE=0 3 * * *
-    # 资源限制（可选）
-    # deploy:
-    #   resources:
-    #     limits:
-    #       cpus: '2'
-    #       memory: 2G
-    #     reservations:
-    #       cpus: '0.5'
-    #       memory: 500M
+## 配置示例
+
+```json
+"sponsor_block": {
+  "enabled": true,
+  "server_address": "https://www.bsbsb.top",
+  "mirror_server_addresses": ["https://www.bsbsb.xyz"],
+  "categories": ["sponsor", "padding"],
+  "mark_categories": [],
+  "cut_mode": "keyframe",
+  "fail_open": true
+}
 ```
 
-### 二进制文件
+更详细的实现说明见 `NOTES.md`，变更历史见 `docs/changelog.md`。
 
-从 [Releases](https://github.com/NeeYoonc/bili-sync-up/releases) 下载对应平台的可执行文件。
+## 致谢
 
-### 开发环境
+- [amtoaer/bili-sync](https://github.com/amtoaer/bili-sync)：原始项目
+- [NeeYoonc/bili-sync-up](https://github.com/NeeYoonc/bili-sync-up)：本 fork 的直接上游
+- [hanydd/BilibiliSponsorBlock](https://github.com/hanydd/BilibiliSponsorBlock)：片段数据与 API
+- [MoviePilot](https://github.com/jxxghp/MoviePilot)、[Sonarr](https://github.com/Sonarr/Sonarr)：媒体服务器通知的参考实现
 
-```bash
-# 克隆项目
-git clone https://github.com/NeeYoonc/bili-sync-up
-cd bili-sync-up
-
-# 安装依赖并启动
-./make.bat setup
-./make.bat dev
-```
-
-访问 `http://localhost:12345` 进入管理界面。
-
-## 📸 界面预览
-
-<details>
-<summary>点击展开截图</summary>
-
-### 主页界面
-![概览](./docs/assets/主页.jpg)
-
-</details>
-
-## 🛠️ 配置说明
-
-首次启动会自动进入设置向导，引导您完成：
-- Cookie 配置
-- 下载路径设置
-- 视频源添加
-
-所有配置支持在 Web 界面实时修改。
-
-## 📂 项目结构
-
-```
-├── crates/                 # Rust 后端
-│   ├── bili_sync/          # 主应用
-│   ├── bili_sync_entity/   # 数据库实体
-│   └── bili_sync_migration/# 数据库迁移
-├── web/                    # Svelte 前端
-├── docs/                   # VitePress 文档
-└── scripts/                # 辅助脚本
-```
-
-## 🤝 贡献指南
-
-欢迎提交 Issue 和 Pull Request！
-
-1. Fork 本项目
-2. 创建功能分支 (`git checkout -b feature/amazing`)
-3. 提交更改 (`git commit -m 'Add amazing feature'`)
-4. 推送分支 (`git push origin feature/amazing`)
-5. 创建 Pull Request
-
-## 📝 许可证
-
-本项目采用 MIT 许可证。
-
-## 🙏 致谢
-
-- [bilibili-API-collect](https://github.com/SocialSisterYi/bilibili-API-collect) - B站接口文档
-- [bilibili-api](https://github.com/Nemo2011/bilibili-api) - Python 接口实现参考
-- [danmu2ass](https://github.com/gwy15/danmu2ass) - 弹幕下载功能
+许可证见 `License`（MIT）。

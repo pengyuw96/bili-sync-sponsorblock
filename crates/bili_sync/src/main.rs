@@ -27,6 +27,8 @@ mod tiktok;
 mod tiktok_impersonate;
 mod tiktok_sign;
 mod unified_downloader;
+mod media_server;
+mod sponsorblock;
 mod utils;
 mod workflow;
 mod workflow_danmaku;
@@ -194,6 +196,12 @@ async fn async_main() -> Result<()> {
     spawn_task(
         "TikTok SDK 自动更新",
         tiktok::tiktok_sdk_scheduler(),
+        &tracker,
+        token.clone(),
+    );
+    spawn_task(
+        "SponsorBlock 心跳",
+        sponsorblock::health::run_heartbeat_loop(),
         &tracker,
         token.clone(),
     );

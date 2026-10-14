@@ -33,6 +33,7 @@
 		PaletteIcon,
 		BellIcon,
 		SparklesIcon,
+		ScissorsIcon,
 		RefreshCwIcon,
 	DatabaseIcon,
 		EyeIcon,
@@ -152,6 +153,18 @@
 			icon: BellIcon
 		},
 		{
+			id: 'sponsor_block',
+			title: 'SponsorBlock',
+			description: '裁剪赞助段，或标记章节供 Emby/Jellyfin 手动跳过',
+			icon: ScissorsIcon
+		},
+		{
+			id: 'media_server',
+			title: 'Emby / Jellyfin',
+			description: '下载完成后通知媒体服务器扫描新文件',
+			icon: RefreshCwIcon
+		},
+		{
 			id: 'ai_rename',
 			title: 'AI重命名',
 			description: '使用AI自动重命名下载的视频文件',
@@ -187,6 +200,10 @@
 		interface: '调整主题模式和前端界面显示偏好。',
 		notification: '配置扫描完成后的推送渠道、测试发送和通知内容。',
 		ai_rename: '配置 AI 自动重命名的启用范围、提示词和相关行为。',
+		sponsor_block:
+			'下载合并后按 BilibiliSponsorBlock 处理。裁剪会从成片去掉片段，并改写字幕和弹幕时间轴；章节标记写入视频章节、字幕和弹幕，供 Emby 用下一章节手动跳过。同一类别裁剪优先，并与「下载后按章节切分」互斥。',
+		media_server:
+			'整轮扫描下载（含 SponsorBlock 裁剪和字幕/弹幕处理）全部结束、队列空闲后，再等待设定秒数，把本轮所有变更目录映射成媒体服务器路径一次性调用 /Library/Media/Updated 定向扫描（等待期间开始新一轮则顺延到新一轮结束）；失败时可回退全库扫描 /Library/Refresh。',
 		system: '调整扫描间隔、监听端口、路径模板和基础系统行为。',
 		database: '查看数据库文件信息与各表数据量；可清理图片代理缓存、AI 对话历史、任务队列历史与孤立记录，执行 VACUUM 压缩或备份数据库。'
 	} as const;
@@ -217,8 +234,8 @@
 		danmakuUpdateMatureIntervalDays: 3,
 		danmakuUpdateColdDays: 180,
 		danmakuUpdateColdIntervalDays: 30,
-		concurrentVideo: 3,
-		concurrentPage: 2,
+		concurrentVideo: 1,
+		concurrentPage: 1,
 		rateLimit: 4,
 		rateDuration: 250,
 		largeSubmissionThreshold: 80,
@@ -318,8 +335,8 @@
 	let danmakuUpdateColdIntervalDays = 30;
 
 	// 并发控制设置
-	let concurrentVideo = 3;
-	let concurrentPage = 2;
+	let concurrentVideo = 1;
+	let concurrentPage = 1;
 	let rateLimit = 4;
 	let rateDuration = 250;
 
@@ -452,6 +469,70 @@
 	let aiRenameRenameParentDir = false;
 	let aiRenameSaving = false;
 	let aiRenameClearingCache = false;
+
+	// SponsorBlock 裁剪配置
+	const SPONSOR_BLOCK_CATEGORY_OPTIONS = [
+		{ value: 'sponsor', label: '赞助广告 (sponsor)' },
+		{ value: 'padding', label: '无意义垫片 (padding)' },
+		{ value: 'selfpromo', label: '自我推广 (selfpromo)' },
+		{ value: 'intro', label: '片头 (intro)' },
+		{ value: 'outro', label: '片尾 (outro)' },
+		{ value: 'interaction', label: '互动提醒 (interaction)' },
+		{ value: 'preview', label: '预告/回顾 (preview)' },
+		{ value: 'filler', label: '过场填充 (filler)' },
+		{ value: 'music_offtopic', label: '非音乐段落 (music_offtopic)' },
+		{ value: 'poi_highlight', label: '高光标记 (poi_highlight)' }
+	] as const;
+	let sponsorBlockEnabled = false;
+	// Emby/Jellyfin 扫描通知
+	let mediaServerEnabled = false;
+	let mediaServerType = 'emby';
+	let mediaServerUrl = '';
+	let mediaServerApiKey = '';
+	let mediaServerApiKeySet = false;
+	let mediaServerClearApiKey = false;
+	let mediaServerMappingsText = '';
+	let mediaServerDelaySeconds = 300;
+	let mediaServerFallback = true;
+	let mediaServerSaving = false;
+	let mediaServerTesting = false;
+	let sponsorBlockCategories: string[] = ['sponsor', 'padding'];
+	let sponsorBlockMarkCategories: string[] = [];
+	let sponsorBlockCutMode = 'keyframe';
+	let sponsorBlockFailOpen = true;
+	let sponsorBlockServerAddress = 'https://www.bsbsb.top';
+	let sponsorBlockMirrorsText = 'https://www.bsbsb.xyz';
+	let sponsorBlockShowAdvanced = false;
+	let sponsorBlockSaving = false;
+	let sponsorBlockHealthChecking = false;
+	let sponsorBlockLastOk: boolean | null = null;
+	let sponsorBlockCheckedAt: string | null = null;
+	let sponsorBlockHealthLatencyMs: number | null = null;
+	let sponsorBlockHealthDetail = '';
+
+	function toggleSponsorBlockCategory(category: string, checked: boolean) {
+		if (checked) {
+			if (!sponsorBlockCategories.includes(category)) {
+				sponsorBlockCategories = [...sponsorBlockCategories, category];
+			}
+			// Cut wins: remove from mark list
+			sponsorBlockMarkCategories = sponsorBlockMarkCategories.filter((c) => c !== category);
+		} else {
+			sponsorBlockCategories = sponsorBlockCategories.filter((c) => c !== category);
+		}
+	}
+
+	function toggleSponsorBlockMarkCategory(category: string, checked: boolean) {
+		if (checked) {
+			// Cannot mark a category that is already selected for cut
+			if (sponsorBlockCategories.includes(category)) return;
+			if (!sponsorBlockMarkCategories.includes(category)) {
+				sponsorBlockMarkCategories = [...sponsorBlockMarkCategories, category];
+			}
+		} else {
+			sponsorBlockMarkCategories = sponsorBlockMarkCategories.filter((c) => c !== category);
+		}
+	}
 
 	// 数据库管理
 	let databaseStatus: {
@@ -742,8 +823,8 @@
 		danmakuUpdateColdIntervalDays = config.danmaku_update_cold_interval_days ?? 30;
 
 		// 并发控制设置
-		concurrentVideo = config.concurrent_video || 3;
-		concurrentPage = config.concurrent_page || 2;
+		concurrentVideo = Math.min(2, Math.max(1, config.concurrent_video || 1));
+		concurrentPage = Math.min(2, Math.max(1, config.concurrent_page || 1));
 		rateLimit = config.rate_limit || 4;
 		rateDuration = config.rate_duration || 250;
 
@@ -844,6 +925,37 @@
 		aiRenameVideoPromptHint = config.ai_rename?.video_prompt_hint || '';
 		aiRenameAudioPromptHint = config.ai_rename?.audio_prompt_hint || '';
 		aiRenameRenameParentDir = config.ai_rename?.rename_parent_dir ?? false;
+
+		// Emby/Jellyfin 扫描通知
+		mediaServerEnabled = config.media_server?.enabled ?? false;
+		mediaServerType = config.media_server?.server_type || 'emby';
+		mediaServerUrl = config.media_server?.url || '';
+		mediaServerApiKey = '';
+		mediaServerApiKeySet = config.media_server?.api_key_set ?? false;
+		mediaServerClearApiKey = false;
+		mediaServerMappingsText = (config.media_server?.path_mappings || [])
+			.map((m) => `${m.from} => ${m.to}`)
+			.join('\n');
+		mediaServerDelaySeconds = config.media_server?.delay_seconds ?? 300;
+		mediaServerFallback = config.media_server?.fallback_full_refresh ?? true;
+
+		// SponsorBlock 裁剪配置
+		sponsorBlockEnabled = config.sponsor_block?.enabled ?? false;
+		sponsorBlockCategories = Array.isArray(config.sponsor_block?.categories)
+			? [...config.sponsor_block.categories]
+			: ['sponsor', 'padding'];
+		sponsorBlockMarkCategories = Array.isArray(config.sponsor_block?.mark_categories)
+			? [...config.sponsor_block.mark_categories].filter(
+					(c) => !sponsorBlockCategories.includes(c)
+				)
+			: [];
+		sponsorBlockCutMode = config.sponsor_block?.cut_mode ?? 'keyframe';
+		sponsorBlockFailOpen = config.sponsor_block?.fail_open ?? true;
+		sponsorBlockServerAddress = config.sponsor_block?.server_address || 'https://www.bsbsb.top';
+		sponsorBlockMirrorsText = (config.sponsor_block?.mirror_server_addresses || []).join(', ');
+		sponsorBlockLastOk =
+			typeof config.sponsor_block?.last_ok === 'boolean' ? config.sponsor_block.last_ok : null;
+		sponsorBlockCheckedAt = config.sponsor_block?.checked_at || null;
 	}
 
 	function scheduleFilenamePreview() {
@@ -1345,11 +1457,14 @@
 				DEFAULT_CONFIG_VALUES.danmakuUpdateColdIntervalDays
 			),
 			// 并发控制设置
-			concurrent_video: normalizeNumberInput(
-				concurrentVideo,
-				DEFAULT_CONFIG_VALUES.concurrentVideo
+			concurrent_video: Math.min(
+				2,
+				normalizeNumberInput(concurrentVideo, DEFAULT_CONFIG_VALUES.concurrentVideo)
 			),
-			concurrent_page: normalizeNumberInput(concurrentPage, DEFAULT_CONFIG_VALUES.concurrentPage),
+			concurrent_page: Math.min(
+				2,
+				normalizeNumberInput(concurrentPage, DEFAULT_CONFIG_VALUES.concurrentPage)
+			),
 			rate_limit: normalizeNumberInput(rateLimit, DEFAULT_CONFIG_VALUES.rateLimit),
 			rate_duration: normalizeNumberInput(rateDuration, DEFAULT_CONFIG_VALUES.rateDuration),
 			// 其他设置
@@ -1428,13 +1543,19 @@
 				largeSourceMaxPagesPerRound,
 				DEFAULT_CONFIG_VALUES.largeSourceMaxPagesPerRound
 			),
-			large_source_concurrent_video: normalizeNumberInput(
+			large_source_concurrent_video: Math.min(
+				2,
+				normalizeNumberInput(
 				largeSourceConcurrentVideo,
 				DEFAULT_CONFIG_VALUES.largeSourceConcurrentVideo
+			)
 			),
-			large_source_concurrent_page: normalizeNumberInput(
+			large_source_concurrent_page: Math.min(
+				2,
+				normalizeNumberInput(
 				largeSourceConcurrentPage,
 				DEFAULT_CONFIG_VALUES.largeSourceConcurrentPage
+			)
 			),
 			large_source_playurl_limit: normalizeNumberInput(
 				largeSourcePlayurlLimit,
@@ -1718,6 +1839,114 @@
 			// 重新加载配置以确保同步
 			await loadConfig();
 			openSheet = null; // 关闭抽屉
+		} else {
+			toast.error('保存失败', { description: response.data.message });
+		}
+	}
+
+	// 检测 SponsorBlock 服务器心跳
+	async function checkSponsorBlockHealth() {
+		sponsorBlockHealthChecking = true;
+		sponsorBlockHealthDetail = '';
+		try {
+			const response = await runRequest(() => api.getSponsorBlockHealth(), {
+				setLoading: () => {},
+				context: '检测 SponsorBlock 服务器失败'
+			});
+			if (!response) return;
+			const data = response.data;
+			sponsorBlockLastOk = data.last_ok;
+			sponsorBlockCheckedAt = data.checked_at;
+			const primary = data.servers?.[0];
+			sponsorBlockHealthLatencyMs = primary?.latency_ms ?? null;
+			const parts = (data.servers || []).map((s) => {
+				const host = s.hostname || s.url;
+				return s.ok
+					? `${host} OK ${s.latency_ms}ms`
+					: `${host} FAIL ${s.error || s.status_code || ''}`;
+			});
+			sponsorBlockHealthDetail = parts.join('；');
+			if (data.last_ok) {
+				toast.success('SponsorBlock 服务器可达');
+			} else {
+				toast.error('SponsorBlock 服务器检测失败');
+			}
+		} finally {
+			sponsorBlockHealthChecking = false;
+		}
+	}
+
+	// 保存 Emby/Jellyfin 扫描通知配置（API 密钥留空 = 不修改）
+	async function saveMediaServerConfig() {
+		const mappings = mediaServerMappingsText
+			.split('\n')
+			.map((line) => line.split('=>'))
+			.filter((parts) => parts.length === 2)
+			.map(([from, to]) => ({ from: from.trim(), to: to.trim() }))
+			.filter((m) => m.from && m.to);
+		const config: UpdateConfigRequest = {
+			media_server_enabled: mediaServerEnabled,
+			media_server_type: mediaServerType,
+			media_server_url: mediaServerUrl.trim(),
+			media_server_path_mappings: mappings,
+			media_server_delay_seconds: Math.max(0, Math.min(3600, Number(mediaServerDelaySeconds) || 0)),
+			media_server_fallback_full_refresh: mediaServerFallback
+		};
+		if (mediaServerApiKey.trim()) config.media_server_api_key = mediaServerApiKey.trim();
+		if (mediaServerClearApiKey) config.media_server_clear_api_key = true;
+		const response = await runRequest(() => api.updateConfig(config), {
+			setLoading: (value) => (mediaServerSaving = value),
+			context: '保存媒体服务器配置失败'
+		});
+		if (!response) return;
+		if (response.data.success) {
+			toast.success('媒体服务器配置保存成功');
+			await loadConfig();
+		} else {
+			toast.error('保存失败', { description: response.data.message });
+		}
+	}
+
+	async function testMediaServerConnection() {
+		const response = await runRequest(() => api.testMediaServer(), {
+			setLoading: (value) => (mediaServerTesting = value),
+			context: '测试连接失败'
+		});
+		if (!response) return;
+		if (response.data.ok) toast.success('连接成功', { description: response.data.message });
+		else toast.error('连接失败', { description: response.data.message });
+	}
+
+	// 保存 SponsorBlock 裁剪配置
+	async function saveSponsorBlockConfig() {
+		const mirrors = sponsorBlockMirrorsText
+			.split(/[,\n]/)
+			.map((s) => s.trim())
+			.filter(Boolean);
+		const categories = [...sponsorBlockCategories];
+		const markCategories = sponsorBlockMarkCategories.filter(
+			(c) => !categories.includes(c)
+		);
+		const config: UpdateConfigRequest = {
+			sponsor_block_enabled: sponsorBlockEnabled,
+			sponsor_block_categories: categories,
+			sponsor_block_mark_categories: markCategories,
+			sponsor_block_cut_mode: sponsorBlockCutMode,
+			sponsor_block_fail_open: sponsorBlockFailOpen,
+			sponsor_block_server_address: sponsorBlockServerAddress.trim(),
+			sponsor_block_mirror_server_addresses: mirrors
+		};
+
+		const response = await runRequest(() => api.updateConfig(config), {
+			setLoading: (value) => (sponsorBlockSaving = value),
+			context: '保存 SponsorBlock 配置失败'
+		});
+		if (!response) return;
+
+		if (response.data.success) {
+			toast.success('SponsorBlock 配置保存成功');
+			await loadConfig();
+			openSheet = null;
 		} else {
 			toast.error('保存失败', { description: response.data.message });
 		}
@@ -2632,9 +2861,12 @@
 							type="number"
 							bind:value={concurrentVideo}
 							min="1"
-							max="10"
-							placeholder="3"
+							max="2"
+							placeholder="1"
 						/>
+						<p class="text-muted-foreground text-xs">
+							范围 1-2，默认 1。合并与 SponsorBlock 裁剪（ffmpeg）同时最多运行这么多个，避免 NAS 过载。
+						</p>
 					</div>
 
 					<div class="space-y-2">
@@ -2644,9 +2876,10 @@
 							type="number"
 							bind:value={concurrentPage}
 							min="1"
-							max="10"
-							placeholder="2"
+							max="2"
+							placeholder="1"
 						/>
+						<p class="text-muted-foreground text-xs">范围 1-2，默认 1。</p>
 					</div>
 
 					<div class="space-y-2">
@@ -3819,7 +4052,7 @@
 									type="number"
 									bind:value={largeSourceConcurrentVideo}
 									min="1"
-									max="32"
+									max="2"
 									placeholder="1"
 								/>
 								<p class="text-muted-foreground text-xs">
@@ -3834,7 +4067,7 @@
 									type="number"
 									bind:value={largeSourceConcurrentPage}
 									min="1"
-									max="32"
+									max="2"
 									placeholder="1"
 								/>
 								<p class="text-muted-foreground text-xs">控制同一视频多P分页并发下载数量</p>
@@ -4250,7 +4483,7 @@
 								id="favorite-quick-subscribe-path"
 								type="text"
 								bind:value={favoriteQuickSubscribePath}
-								placeholder={'/Downloads/收藏夹/{{name}}'}
+								placeholder={'/bili-sync/收藏夹/{{name}}'}
 							/>
 						</div>
 
@@ -4260,7 +4493,7 @@
 								id="collection-quick-subscribe-path"
 								type="text"
 								bind:value={collectionQuickSubscribePath}
-								placeholder={'/Downloads/合集/{{name}}'}
+								placeholder={'/bili-sync/合集/{{name}}'}
 							/>
 						</div>
 
@@ -4270,7 +4503,7 @@
 								id="submission-quick-subscribe-path"
 								type="text"
 								bind:value={submissionQuickSubscribePath}
-								placeholder={'/Downloads/UP投稿/{{name}}'}
+								placeholder={'/bili-sync/投稿/{{name}}'}
 							/>
 						</div>
 						<div class="space-y-2">
@@ -4279,7 +4512,7 @@
 								id="bangumi-quick-subscribe-path"
 								type="text"
 								bind:value={bangumiQuickSubscribePath}
-								placeholder={'/Downloads/番剧/{{name}}'}
+								placeholder={'/bili-sync/番剧/{{name}}'}
 							/>
 						</div>
 						<div class="space-y-2">
@@ -4288,7 +4521,7 @@
 								id="pugv-quick-subscribe-path"
 								type="text"
 								bind:value={pugvQuickSubscribePath}
-								placeholder={'/Downloads/课程/{{name}}'}
+								placeholder={'/bili-sync/课程/{{name}}'}
 							/>
 						</div>
 						<div class="space-y-2">
@@ -5307,6 +5540,306 @@
 					{aiRenameSaving ? '保存中...' : '保存设置'}
 				</Button>
 			</div>
+		</SheetFooter>
+	</form>
+</ResponsiveSheet>
+
+<!-- SponsorBlock 裁剪设置抽屉 -->
+<ResponsiveSheet
+	open={openSheet === 'sponsor_block'}
+	onOpenChange={(open) => {
+		if (!open) openSheet = null;
+	}}
+	title="SponsorBlock"
+	description="裁剪会直接去掉片段；章节标记供 Emby 时间轴手动跳到下一段"
+	titleTooltip={getSettingTooltip('sponsor_block')}
+	{isMobile}
+>
+	<form
+		onsubmit={(e) => {
+			e.preventDefault();
+			saveSponsorBlockConfig();
+		}}
+		class="flex flex-col {isMobile ? 'h-[calc(90vh-8rem)]' : 'h-[calc(100vh-12rem)]'}"
+	>
+		<div class="min-h-0 flex-1 space-y-6 overflow-y-auto {isMobile ? 'px-4 py-4' : 'px-6 py-6'}">
+			<div
+				class="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/20"
+			>
+				<h4 class="mb-2 font-medium text-amber-800 dark:text-amber-400">功能说明</h4>
+				<p class="text-sm text-amber-700 dark:text-amber-300">
+					裁剪：从成片去掉对应片段（播放时等于自动跳过），并按新时间轴改写字幕和弹幕。章节标记：嵌入视频章节，并在字幕和弹幕里写入「〔SB〕」提示。Emby 没有按章节自动跳过，请用下一章节或章节菜单手动跳过。同一类别不可同时勾选（裁剪优先）。与「下载后按章节切分」互斥。
+				</p>
+				<p class="mt-2 text-xs text-amber-600 dark:text-amber-400">
+					片段数据来自
+					<a
+						href="https://github.com/hanydd/BilibiliSponsorBlock"
+						target="_blank"
+						rel="noopener noreferrer"
+						class="underline hover:opacity-80">BilibiliSponsorBlock</a
+					>
+					社区标注（非官方），本功能仅消费其公开 API。
+				</p>
+			</div>
+
+			<div class="space-y-4">
+				<div class="flex items-center space-x-2">
+					<input
+						type="checkbox"
+						id="sponsor-block-enabled"
+						bind:checked={sponsorBlockEnabled}
+						class="text-primary focus:ring-primary h-4 w-4 rounded border-gray-300"
+					/>
+					<Label
+						for="sponsor-block-enabled"
+						class="text-sm leading-none font-medium peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+					>
+						启用 SponsorBlock
+					</Label>
+				</div>
+				<p class="text-muted-foreground text-sm">
+					开启后，B 站视频合并成功即按下方勾选的类别裁剪和/或标记章节；若该源启用了「下载后按章节切分」则会跳过裁剪与标记。
+				</p>
+
+				<div class="space-y-2">
+					<Label>裁剪类别</Label>
+					<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+						{#each SPONSOR_BLOCK_CATEGORY_OPTIONS as opt}
+							<label class="flex items-center space-x-2 text-sm">
+								<input
+									type="checkbox"
+									checked={sponsorBlockCategories.includes(opt.value)}
+									onchange={(e) =>
+										toggleSponsorBlockCategory(
+											opt.value,
+											(e.currentTarget as HTMLInputElement).checked
+										)}
+									class="text-primary focus:ring-primary h-4 w-4 rounded border-gray-300"
+								/>
+								<span>{opt.label}</span>
+							</label>
+						{/each}
+					</div>
+					<p class="text-muted-foreground text-xs">默认仅勾选赞助广告与垫片。勾选后用 ffmpeg 流拷贝裁掉对应片段，并同步改写字幕与弹幕时间轴。</p>
+				</div>
+
+				<div class="space-y-2">
+					<Label>章节标记类别</Label>
+					<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+						{#each SPONSOR_BLOCK_CATEGORY_OPTIONS as opt}
+							<label class="flex items-center space-x-2 text-sm {sponsorBlockCategories.includes(opt.value) ? 'opacity-50' : ''}">
+								<input
+									type="checkbox"
+									disabled={sponsorBlockCategories.includes(opt.value)}
+									checked={sponsorBlockMarkCategories.includes(opt.value)}
+									onchange={(e) =>
+										toggleSponsorBlockMarkCategory(
+											opt.value,
+											(e.currentTarget as HTMLInputElement).checked
+										)}
+									class="text-primary focus:ring-primary h-4 w-4 rounded border-gray-300 disabled:cursor-not-allowed"
+								/>
+								<span>{opt.label}</span>
+							</label>
+						{/each}
+					</div>
+					<p class="text-sm text-amber-700 dark:text-amber-300">
+						标记会嵌入视频章节，并写入现有字幕、一份 *.sponsorblock.zh.srt，以及顶部弹幕。Emby 不提供 SponsorBlock 式自动跳过按钮，用下一章节或章节菜单跳过。已在「裁剪类别」勾选的项会自动禁用。
+					</p>
+				</div>
+
+				<div class="space-y-2">
+					<Label for="sponsor-block-cut-mode" class="text-sm font-medium">裁剪模式</Label>
+					<select
+						id="sponsor-block-cut-mode"
+						bind:value={sponsorBlockCutMode}
+						class="border-input bg-background h-9 w-full rounded-md border px-3 text-sm"
+					>
+						<option value="keyframe">关键帧（快，流复制，切点误差不超过半个 GOP）</option>
+						<option value="accurate">精确（重新编码视频，切点精确到帧，耗 CPU）</option>
+					</select>
+				</div>
+				<p class="text-muted-foreground text-xs">
+					裁剪后只保留剪辑后的视频、字幕和元数据，不再保留原片。
+				</p>
+
+				<div class="flex items-center space-x-2">
+					<input
+						type="checkbox"
+						id="sponsor-block-fail-open"
+						bind:checked={sponsorBlockFailOpen}
+						class="text-primary focus:ring-primary h-4 w-4 rounded border-gray-300"
+					/>
+					<Label
+						for="sponsor-block-fail-open"
+						class="text-sm leading-none font-medium peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+					>
+						失败时保留原片（fail_open）
+					</Label>
+				</div>
+				<p class="text-muted-foreground text-xs">
+					API / ffmpeg 裁剪或章节嵌入失败时只打警告并保留媒体文件（推荐开启）。
+				</p>
+
+				<div
+					class="flex flex-col gap-2 rounded-lg border border-border p-3 sm:flex-row sm:items-center sm:justify-between"
+				>
+					<div class="text-sm">
+						<p class="font-medium">服务器心跳</p>
+						{#if sponsorBlockCheckedAt}
+							<p class="text-muted-foreground text-xs">
+								上次检测：
+								{#if sponsorBlockLastOk === true}
+									<span class="text-green-600 dark:text-green-400">正常</span>
+								{:else if sponsorBlockLastOk === false}
+									<span class="text-red-600 dark:text-red-400">失败</span>
+								{:else}
+									未知
+								{/if}
+								{#if sponsorBlockHealthLatencyMs != null}
+									· {sponsorBlockHealthLatencyMs}ms
+								{/if}
+								· {sponsorBlockCheckedAt}
+							</p>
+							{#if sponsorBlockHealthDetail}
+								<p class="text-muted-foreground mt-1 text-xs">{sponsorBlockHealthDetail}</p>
+							{/if}
+						{:else}
+							<p class="text-muted-foreground text-xs">尚未检测；可点击右侧按钮探测主站与镜像。</p>
+						{/if}
+					</div>
+					<Button
+						type="button"
+						variant="outline"
+						size="sm"
+						disabled={sponsorBlockHealthChecking}
+						onclick={() => checkSponsorBlockHealth()}
+					>
+						{sponsorBlockHealthChecking ? '检测中...' : '检测'}
+					</Button>
+				</div>
+
+				<details
+					bind:open={sponsorBlockShowAdvanced}
+					class="rounded-lg border border-border p-3"
+				>
+					<summary class="cursor-pointer text-sm font-medium">高级选项：服务器地址</summary>
+					<div class="mt-3 space-y-4">
+						<div class="space-y-2">
+							<Label for="sponsor-block-server">主服务器</Label>
+							<Input
+								id="sponsor-block-server"
+								bind:value={sponsorBlockServerAddress}
+								placeholder="https://www.bsbsb.top"
+							/>
+						</div>
+						<div class="space-y-2">
+							<Label for="sponsor-block-mirrors">镜像服务器（逗号分隔）</Label>
+							<Input
+								id="sponsor-block-mirrors"
+								bind:value={sponsorBlockMirrorsText}
+								placeholder="https://www.bsbsb.xyz"
+							/>
+							<p class="text-muted-foreground text-xs">主站失败时按顺序尝试镜像。</p>
+						</div>
+					</div>
+				</details>
+			</div>
+		</div>
+		<SheetFooter class={isMobile ? 'pb-safe border-t px-4 pt-3' : 'pb-safe border-t pt-4'}>
+			<Button type="submit" disabled={sponsorBlockSaving} class="w-full">
+				{sponsorBlockSaving ? '保存中...' : '保存设置'}
+			</Button>
+		</SheetFooter>
+	</form>
+</ResponsiveSheet>
+
+<!-- Emby/Jellyfin 扫描通知抽屉 -->
+<ResponsiveSheet
+	open={openSheet === 'media_server'}
+	onOpenChange={(open) => {
+		if (!open) openSheet = null;
+	}}
+	title="Emby / Jellyfin"
+	description="下载完成后通知媒体服务器扫描"
+	titleTooltip={getSettingTooltip('media_server')}
+	{isMobile}
+>
+	<form
+		onsubmit={(e) => {
+			e.preventDefault();
+			saveMediaServerConfig();
+		}}
+		class="flex flex-col {isMobile ? 'h-[calc(90vh-8rem)]' : 'h-[calc(100vh-12rem)]'}"
+	>
+		<div class="min-h-0 flex-1 space-y-6 overflow-y-auto {isMobile ? 'px-4 py-4' : 'px-6 py-6'}">
+			<div class="flex items-center space-x-2">
+				<input
+					type="checkbox"
+					id="media-server-enabled"
+					bind:checked={mediaServerEnabled}
+					class="text-primary focus:ring-primary h-4 w-4 rounded border-gray-300"
+				/>
+				<Label for="media-server-enabled" class="text-sm font-medium">启用扫描通知</Label>
+			</div>
+			<div class="space-y-2">
+				<Label for="media-server-type">服务器类型</Label>
+				<select
+					id="media-server-type"
+					bind:value={mediaServerType}
+					class="border-input bg-background h-9 w-full rounded-md border px-3 text-sm"
+				>
+					<option value="emby">Emby</option>
+					<option value="jellyfin">Jellyfin</option>
+				</select>
+			</div>
+			<div class="space-y-2">
+				<Label for="media-server-url">服务器地址</Label>
+				<Input id="media-server-url" bind:value={mediaServerUrl} placeholder="http://<NAS_IP>:8096" />
+			</div>
+			<div class="space-y-2">
+				<Label for="media-server-key">API 密钥</Label>
+				<Input
+					id="media-server-key"
+					type="password"
+					autocomplete="off"
+					bind:value={mediaServerApiKey}
+					placeholder={mediaServerApiKeySet ? '已设置（留空保持不变）' : '在 Emby 控制台 → 高级 → API 密钥 生成'}
+				/>
+				{#if mediaServerApiKeySet}
+					<label class="text-muted-foreground flex items-center gap-2 text-xs">
+						<input type="checkbox" bind:checked={mediaServerClearApiKey} /> 清除已保存的密钥
+					</label>
+				{/if}
+			</div>
+			<div class="space-y-2">
+				<Label for="media-server-mappings">路径映射（每行一条：本容器路径 =&gt; 媒体服务器路径）</Label>
+				<textarea
+					id="media-server-mappings"
+					bind:value={mediaServerMappingsText}
+					rows="4"
+					class="border-input bg-background w-full rounded-md border px-3 py-2 font-mono text-sm"
+					placeholder="/bili-sync => /media/bili-sync"
+				></textarea>
+				<p class="text-muted-foreground text-xs">按最长前缀匹配；未匹配的路径原样发送。目标为 Windows/UNC 路径时自动使用反斜杠。</p>
+			</div>
+			<div class="space-y-2">
+				<Label for="media-server-delay">整轮结束后等待（秒）</Label>
+				<Input id="media-server-delay" type="number" min="0" max="3600" bind:value={mediaServerDelaySeconds} />
+				<p class="text-muted-foreground text-xs">默认 300。整轮下载全部结束后再等这么久才通知；期间若开始新一轮则继续收集，待新一轮结束后再计时。</p>
+			</div>
+			<div class="flex items-center space-x-2">
+				<input type="checkbox" id="media-server-fallback" bind:checked={mediaServerFallback} class="h-4 w-4" />
+				<Label for="media-server-fallback" class="text-sm">定向扫描失败时回退全库扫描</Label>
+			</div>
+			<Button type="button" variant="outline" disabled={mediaServerTesting} onclick={testMediaServerConnection}>
+				{mediaServerTesting ? '测试中...' : '测试连接（使用已保存配置）'}
+			</Button>
+		</div>
+		<SheetFooter class={isMobile ? 'pb-safe border-t px-4 pt-3' : 'pb-safe border-t pt-4'}>
+			<Button type="submit" disabled={mediaServerSaving} class="w-full">
+				{mediaServerSaving ? '保存中...' : '保存设置'}
+			</Button>
 		</SheetFooter>
 	</form>
 </ResponsiveSheet>

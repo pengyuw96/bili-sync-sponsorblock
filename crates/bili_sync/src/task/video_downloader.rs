@@ -904,6 +904,10 @@ pub async fn video_downloader(connection: Arc<DatabaseConnection>) {
         // ========== 扫描任务阶段 ==========
         // 注意：在此阶段不应该中断任务，即使配置更新了也要等待当前扫描完成
 
+        // 媒体服务器扫描通知：整轮（含下载与 SponsorBlock 裁剪）结束时 drop，
+        // 之后再等 delay_seconds 统一通知一次。
+        let media_server_round = crate::media_server::RoundGuard::start();
+
         // 检查是否需要暂停扫描任务
         if TASK_CONTROLLER.is_paused() {
             debug!("定时扫描任务已暂停，等待恢复...");
@@ -935,7 +939,7 @@ pub async fn video_downloader(connection: Arc<DatabaseConnection>) {
         let youtube_result = crate::youtube::process_scheduled_sources(
             optimized_connection.as_ref(),
             shared_downloader,
-            config.concurrent_limit.video,
+            config.concurrent_limit.effective_video(),
         )
         .await;
         TASK_CONTROLLER.set_scanning(false);
@@ -1586,6 +1590,8 @@ pub async fn video_downloader(connection: Arc<DatabaseConnection>) {
             info!("检测到任务刷新信号，跳过等待并立即开始新一轮扫描");
             continue;
         }
+
+        drop(media_server_round);
 
         // ========== 等待阶段 ==========
         // 安全时机：扫描任务已完成，可以安全地检测配置更新并决定是否立即开始下一轮
