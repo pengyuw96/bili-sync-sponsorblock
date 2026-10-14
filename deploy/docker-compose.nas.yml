@@ -4,7 +4,7 @@
 # on 2026-10-12 (backup next to data.sqlite).
 services:
   bili-sync-sponsorblock:
-    image: bili-sync-sponsorblock:3.1.4.6
+    image: bili-sync-sponsorblock:3.1.5.1
     container_name: bili-sync-sponsorblock
     restart: unless-stopped
     user: "<UID>:<GID>"

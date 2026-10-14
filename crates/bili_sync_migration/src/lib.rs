@@ -88,6 +88,7 @@ mod m20260905_000001_backfill_external_moved_media_as_completed;
 mod m20260913_000001_retry_failed_tiktok_image_posts;
 mod m20260926_000001_add_page_sponsor_cut_result;
 mod m20261014_000001_fix_page_status_index;
+mod m20261015_000001_add_source_sponsorblock_enabled;
 
 pub struct Migrator;
 
@@ -183,6 +184,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260913_000001_retry_failed_tiktok_image_posts::Migration),
             Box::new(m20260926_000001_add_page_sponsor_cut_result::Migration),
             Box::new(m20261014_000001_fix_page_status_index::Migration),
+            Box::new(m20261015_000001_add_source_sponsorblock_enabled::Migration),
         ]
     }
 }

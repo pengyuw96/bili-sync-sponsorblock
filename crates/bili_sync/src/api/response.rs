@@ -174,6 +174,7 @@ pub struct UpdateVideoSourceDownloadOptionsResponse {
     pub flat_folder: bool,
     pub split_chapters_after_download: bool,
     pub download_charge_videos: bool,
+    pub sponsorblock_enabled: bool,
     pub download_danmaku: bool,
     pub download_subtitle: bool,
     pub download_ai_subtitle: bool,
@@ -280,6 +281,7 @@ pub struct VideoSource {
     pub flat_folder: bool,                   // 是否启用平铺目录模式
     pub split_chapters_after_download: bool, // 是否在下载后按播放器章节切分为独立视频
     pub download_charge_videos: bool,        // 是否下载充电专享视频
+    pub sponsorblock_enabled: bool,          // 是否对该源启用 SponsorBlock 广告剪辑
     pub download_danmaku: bool,              // 是否下载弹幕文件
     pub download_subtitle: bool,             // 是否下载字幕文件
     pub download_ai_subtitle: bool,          // 是否下载 B 站 AI 字幕

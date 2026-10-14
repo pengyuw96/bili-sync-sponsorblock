@@ -2,8 +2,8 @@
 
 基于 [NeeYoonc/bili-sync-up](https://github.com/NeeYoonc/bili-sync-up)（上游 [amtoaer/bili-sync](https://github.com/amtoaer/bili-sync)）的社区 fork，主要加入 [BilibiliSponsorBlock](https://github.com/hanydd/BilibiliSponsorBlock) 广告片段剪辑，并针对 Emby / Jellyfin 媒体库做了适配。
 
-- 当前版本：**v3.1.4.6**（Cargo 包版本号为 `3.1.4`，Cargo 不支持四段版本号）
-- 上游代码基线：bili-sync-up **v3.1.3**（`f5a91a97`）
+- 当前版本：**v3.1.5.1**（Cargo 包版本号为 `3.1.5`，Cargo 不支持四段版本号）
+- 上游代码基线：bili-sync-up **v3.1.5**（`a73c2fca`）
 - 非官方版本，问题请勿反馈到上游。
 
 ## 一、SponsorBlock 剪辑（核心功能）

@@ -7616,6 +7616,10 @@ async fn download_page(
     } else if m4a_only_mode {
         sponsor_cut_result = Some("disabled".to_string());
         Ok(ExecutionStatus::Skipped)
+    } else if !video_source.sponsorblock_enabled() {
+        // 该视频源单独关闭了广告剪辑：只跳过剪辑位，不影响媒体下载，已下载文件不会重下。
+        sponsor_cut_result = Some("disabled".to_string());
+        Ok(ExecutionStatus::Skipped)
     } else {
         let cut_path = if video_path.exists() {
             video_path.clone()

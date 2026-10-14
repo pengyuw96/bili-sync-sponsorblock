@@ -615,6 +615,7 @@ class ApiClient {
 			flat_folder?: boolean;
 			split_chapters_after_download?: boolean;
 			download_charge_videos?: boolean;
+			sponsorblock_enabled?: boolean;
 			download_danmaku?: boolean;
 			download_subtitle?: boolean;
 			download_ai_subtitle?: boolean;
@@ -640,6 +641,7 @@ class ApiClient {
 			flat_folder: boolean;
 			split_chapters_after_download: boolean;
 			download_charge_videos: boolean;
+			sponsorblock_enabled: boolean;
 			download_danmaku: boolean;
 			download_subtitle: boolean;
 			download_ai_subtitle: boolean;
@@ -687,6 +689,7 @@ class ApiClient {
 					flat_folder: source.flat_folder,
 					split_chapters_after_download: false,
 					download_charge_videos: false,
+					sponsorblock_enabled: false,
 					download_danmaku: source.download_danmaku,
 					download_subtitle: source.download_subtitle,
 					download_ai_subtitle: source.download_subtitle,
@@ -714,6 +717,7 @@ class ApiClient {
 			flat_folder: boolean;
 			split_chapters_after_download: boolean;
 			download_charge_videos: boolean;
+			sponsorblock_enabled: boolean;
 			download_danmaku: boolean;
 			download_subtitle: boolean;
 			download_ai_subtitle: boolean;
@@ -1739,6 +1743,7 @@ export const api = {
 			flat_folder?: boolean;
 			split_chapters_after_download?: boolean;
 			download_charge_videos?: boolean;
+			sponsorblock_enabled?: boolean;
 			download_danmaku?: boolean;
 			download_subtitle?: boolean;
 			download_ai_subtitle?: boolean;

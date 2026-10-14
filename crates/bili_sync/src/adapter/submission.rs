@@ -290,6 +290,10 @@ impl VideoSource for submission::Model {
         self.download_charge_videos
     }
 
+    fn sponsorblock_enabled(&self) -> bool {
+        self.sponsorblock_enabled
+    }
+
     fn download_danmaku(&self) -> bool {
         self.download_danmaku
     }

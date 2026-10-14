@@ -302,6 +302,7 @@ export interface VideoSource {
 	flat_folder: boolean; // 平铺目录模式（不为每个视频创建子文件夹）
 	split_chapters_after_download: boolean; // 下载后按播放器章节切分为独立视频
 	download_charge_videos: boolean; // 是否下载充电视频
+	sponsorblock_enabled?: boolean; // 是否启用 SponsorBlock 广告剪辑（默认true）
 	download_danmaku: boolean; // 是否下载弹幕
 	download_subtitle: boolean; // 是否下载字幕
 	download_ai_subtitle: boolean; // 是否下载 B 站 AI 字幕
@@ -513,6 +514,7 @@ export interface AddVideoSourceRequest {
 	flat_folder?: boolean; // 平铺目录模式（不为每个视频创建子文件夹）
 	split_chapters_after_download?: boolean; // 下载后按播放器章节切分为独立视频
 	download_charge_videos?: boolean; // 是否下载充电视频（默认true）
+	sponsorblock_enabled?: boolean; // 是否启用 SponsorBlock 广告剪辑（默认true）
 	download_danmaku?: boolean; // 是否下载弹幕（默认true）
 	download_subtitle?: boolean; // 是否下载字幕（默认true）
 	download_ai_subtitle?: boolean; // 是否下载 B 站 AI 字幕（默认true）

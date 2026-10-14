@@ -31,6 +31,7 @@ pub struct Model {
     pub flat_folder: bool,
     pub split_chapters_after_download: bool,
     pub download_charge_videos: bool,
+    pub sponsorblock_enabled: bool,
     pub download_danmaku: bool,
     pub download_subtitle: bool,
     pub download_ai_subtitle: bool,

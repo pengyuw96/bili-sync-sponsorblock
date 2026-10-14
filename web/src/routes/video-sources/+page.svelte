@@ -57,6 +57,7 @@
 	import LanguagesIcon from '@lucide/svelte/icons/languages';
 	import ActivityIcon from '@lucide/svelte/icons/activity';
 	import BatteryChargingIcon from '@lucide/svelte/icons/battery-charging';
+	import ScissorsIcon from '@lucide/svelte/icons/scissors';
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
 	import HistoryIcon from '@lucide/svelte/icons/history';
 	import SlidersHorizontalIcon from '@lucide/svelte/icons/sliders-horizontal';
@@ -365,6 +366,7 @@
 			flat_folder: source.flat_folder,
 			split_chapters_after_download: false,
 			download_charge_videos: false,
+			sponsorblock_enabled: false,
 			download_danmaku: source.download_danmaku,
 			download_subtitle: source.download_subtitle,
 			download_ai_subtitle: source.download_subtitle,
@@ -1085,6 +1087,35 @@
 					updateSourceInStore(sourceType, sourceId, (source) => ({
 						...source,
 						download_charge_videos: data.download_charge_videos
+					}));
+				}
+			}
+		);
+	}
+
+	// 切换该视频源的 SponsorBlock 广告剪辑（全局 SponsorBlock 开关仍为总闸）
+	async function handleToggleSponsorBlock(
+		sourceType: string,
+		sourceId: number,
+		currentSponsorBlockEnabled: boolean
+	) {
+		const newSponsorBlockEnabled = !currentSponsorBlockEnabled;
+		await updateAndApply(
+			() =>
+				api.updateVideoSourceDownloadOptions(sourceType, sourceId, {
+					sponsorblock_enabled: newSponsorBlockEnabled
+				}),
+			{
+				successToast: () => ({
+					title: '设置更新成功',
+					description: newSponsorBlockEnabled
+						? '已启用广告剪辑（仅对之后处理的视频生效）'
+						: '已禁用广告剪辑（已下载视频不受影响）'
+				}),
+				applyLocalUpdate: (data) => {
+					updateSourceInStore(sourceType, sourceId, (source) => ({
+						...source,
+						sponsorblock_enabled: data.sponsorblock_enabled
 					}));
 				}
 			}
@@ -1897,6 +1928,9 @@
 													{#if !isExternalSourceType(sourceConfig.type) && source.download_charge_videos === false}
 														<span class="text-pink-600">充电视频下载已禁用</span>
 													{/if}
+													{#if !isExternalSourceType(sourceConfig.type) && sourceConfig.type !== 'manga' && source.sponsorblock_enabled === false}
+														<span class="text-rose-600">广告剪辑已禁用</span>
+													{/if}
 													{#if source.use_dynamic_api}
 														<span class="text-blue-600">动态API已启用</span>
 													{/if}
@@ -2000,6 +2034,29 @@
 															: 'text-gray-400'}"
 													/>
 												</Button>
+
+												{#if sourceConfig.type !== 'manga'}
+													<Button
+														size="sm"
+														variant="ghost"
+														onclick={() =>
+															handleToggleSponsorBlock(
+																sourceConfig.type,
+																source.id,
+																source.sponsorblock_enabled ?? true
+															)}
+														title={source.sponsorblock_enabled !== false
+															? '禁用广告剪辑（SponsorBlock）'
+															: '启用广告剪辑（SponsorBlock）'}
+														class="h-8 w-8 p-0"
+													>
+														<ScissorsIcon
+															class="h-4 w-4 {source.sponsorblock_enabled !== false
+																? 'text-rose-600'
+																: 'text-gray-400'}"
+														/>
+													</Button>
+												{/if}
 
 												{#if sourceConfig.type !== 'bangumi' && sourceConfig.type !== 'pugv' && sourceConfig.type !== 'manga'}
 													<Button

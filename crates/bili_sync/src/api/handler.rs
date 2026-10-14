@@ -2804,6 +2804,7 @@ pub async fn get_video_sources(
                 flat_folder: model.flat_folder,
                 split_chapters_after_download: model.split_chapters_after_download,
                 download_charge_videos: model.download_charge_videos,
+                sponsorblock_enabled: model.sponsorblock_enabled,
                 download_danmaku: model.download_danmaku,
                 download_subtitle: model.download_subtitle,
                 download_ai_subtitle: model.download_ai_subtitle,
@@ -2870,6 +2871,7 @@ pub async fn get_video_sources(
                 flat_folder: model.flat_folder,
                 split_chapters_after_download: model.split_chapters_after_download,
                 download_charge_videos: model.download_charge_videos,
+                sponsorblock_enabled: model.sponsorblock_enabled,
                 download_danmaku: model.download_danmaku,
                 download_subtitle: model.download_subtitle,
                 download_ai_subtitle: model.download_ai_subtitle,
@@ -2936,6 +2938,7 @@ pub async fn get_video_sources(
                 flat_folder: model.flat_folder,
                 split_chapters_after_download: model.split_chapters_after_download,
                 download_charge_videos: model.download_charge_videos,
+                sponsorblock_enabled: model.sponsorblock_enabled,
                 download_danmaku: model.download_danmaku,
                 download_subtitle: model.download_subtitle,
                 download_ai_subtitle: model.download_ai_subtitle,
@@ -3002,6 +3005,7 @@ pub async fn get_video_sources(
                 flat_folder: model.flat_folder,
                 split_chapters_after_download: model.split_chapters_after_download,
                 download_charge_videos: model.download_charge_videos,
+                sponsorblock_enabled: model.sponsorblock_enabled,
                 download_danmaku: model.download_danmaku,
                 download_subtitle: model.download_subtitle,
                 download_ai_subtitle: model.download_ai_subtitle,
@@ -3091,6 +3095,7 @@ pub async fn get_video_sources(
                 flat_folder: model.flat_folder,
                 split_chapters_after_download: model.split_chapters_after_download,
                 download_charge_videos: model.download_charge_videos,
+                sponsorblock_enabled: model.sponsorblock_enabled,
                 download_danmaku: model.download_danmaku,
                 download_subtitle: model.download_subtitle,
                 download_ai_subtitle: model.download_ai_subtitle,
@@ -5340,6 +5345,7 @@ pub async fn add_video_source(
             collection_aggregate_enabled: params.collection_aggregate_enabled,
             filter_option: params.filter_option.clone(),
             download_charge_videos: params.download_charge_videos,
+            sponsorblock_enabled: params.sponsorblock_enabled,
             media_id: params.media_id.clone(),
             ep_id: params.ep_id.clone(),
             download_all_seasons: params.download_all_seasons,
@@ -5511,6 +5517,7 @@ pub async fn add_video_source_internal(
                 flat_folder: sea_orm::Set(params.flat_folder.unwrap_or(false)),
                 split_chapters_after_download: sea_orm::Set(params.split_chapters_after_download.unwrap_or(false)),
                 download_charge_videos: sea_orm::Set(params.download_charge_videos.unwrap_or(true)),
+                sponsorblock_enabled: sea_orm::Set(params.sponsorblock_enabled.unwrap_or(true)),
                 download_danmaku: sea_orm::Set(params.download_danmaku.unwrap_or(true)),
                 download_subtitle: sea_orm::Set(params.download_subtitle.unwrap_or(true)),
                 download_ai_subtitle: sea_orm::Set(params.download_ai_subtitle.unwrap_or(true)),
@@ -5615,6 +5622,7 @@ pub async fn add_video_source_internal(
                 flat_folder: sea_orm::Set(params.flat_folder.unwrap_or(false)),
                 split_chapters_after_download: sea_orm::Set(params.split_chapters_after_download.unwrap_or(false)),
                 download_charge_videos: sea_orm::Set(params.download_charge_videos.unwrap_or(true)),
+                sponsorblock_enabled: sea_orm::Set(params.sponsorblock_enabled.unwrap_or(true)),
                 download_danmaku: sea_orm::Set(params.download_danmaku.unwrap_or(true)),
                 download_subtitle: sea_orm::Set(params.download_subtitle.unwrap_or(true)),
                 download_ai_subtitle: sea_orm::Set(params.download_ai_subtitle.unwrap_or(true)),
@@ -5714,6 +5722,7 @@ pub async fn add_video_source_internal(
                 flat_folder: sea_orm::Set(params.flat_folder.unwrap_or(false)),
                 split_chapters_after_download: sea_orm::Set(params.split_chapters_after_download.unwrap_or(false)),
                 download_charge_videos: sea_orm::Set(params.download_charge_videos.unwrap_or(true)),
+                sponsorblock_enabled: sea_orm::Set(params.sponsorblock_enabled.unwrap_or(true)),
                 use_dynamic_api: sea_orm::Set(params.use_dynamic_api.unwrap_or(false)),
                 dynamic_api_full_synced: sea_orm::Set(params.use_dynamic_api.unwrap_or(false)),
             };
@@ -6036,6 +6045,7 @@ pub async fn add_video_source_internal(
                     audio_only: sea_orm::Set(params.audio_only.unwrap_or(false)),
                     split_chapters_after_download: sea_orm::Set(params.split_chapters_after_download.unwrap_or(false)),
                     download_charge_videos: sea_orm::Set(params.download_charge_videos.unwrap_or(true)),
+                    sponsorblock_enabled: sea_orm::Set(params.sponsorblock_enabled.unwrap_or(true)),
                     download_danmaku: sea_orm::Set(params.download_danmaku.unwrap_or(true)),
                     download_subtitle: sea_orm::Set(params.download_subtitle.unwrap_or(true)),
                     download_ai_subtitle: sea_orm::Set(params.download_ai_subtitle.unwrap_or(true)),
@@ -6122,6 +6132,7 @@ pub async fn add_video_source_internal(
                 audio_only: sea_orm::Set(params.audio_only.unwrap_or(false)),
                 split_chapters_after_download: sea_orm::Set(params.split_chapters_after_download.unwrap_or(false)),
                 download_charge_videos: sea_orm::Set(params.download_charge_videos.unwrap_or(true)),
+                sponsorblock_enabled: sea_orm::Set(params.sponsorblock_enabled.unwrap_or(true)),
                 download_danmaku: sea_orm::Set(params.download_danmaku.unwrap_or(true)),
                 download_subtitle: sea_orm::Set(params.download_subtitle.unwrap_or(true)),
                 download_ai_subtitle: sea_orm::Set(params.download_ai_subtitle.unwrap_or(true)),
@@ -6284,6 +6295,7 @@ pub async fn add_video_source_internal(
                 flat_folder: sea_orm::Set(params.flat_folder.unwrap_or(false)),
                 split_chapters_after_download: sea_orm::Set(params.split_chapters_after_download.unwrap_or(false)),
                 download_charge_videos: sea_orm::Set(params.download_charge_videos.unwrap_or(true)),
+                sponsorblock_enabled: sea_orm::Set(params.sponsorblock_enabled.unwrap_or(true)),
             };
 
             let insert_result = watch_later::Entity::insert(watch_later).exec(&txn).await?;
@@ -8954,6 +8966,7 @@ pub async fn update_video_source_download_options_internal(
             let download_charge_videos = params
                 .download_charge_videos
                 .unwrap_or(collection.download_charge_videos);
+            let sponsorblock_enabled = params.sponsorblock_enabled.unwrap_or(collection.sponsorblock_enabled);
             let download_danmaku = params.download_danmaku.unwrap_or(collection.download_danmaku);
             let download_subtitle = params.download_subtitle.unwrap_or(collection.download_subtitle);
             let download_ai_subtitle = params.download_ai_subtitle.unwrap_or(collection.download_ai_subtitle);
@@ -9009,6 +9022,7 @@ pub async fn update_video_source_download_options_internal(
                 flat_folder: sea_orm::Set(flat_folder),
                 split_chapters_after_download: sea_orm::Set(split_chapters_after_download),
                 download_charge_videos: sea_orm::Set(download_charge_videos),
+                sponsorblock_enabled: sea_orm::Set(sponsorblock_enabled),
                 download_danmaku: sea_orm::Set(download_danmaku),
                 download_subtitle: sea_orm::Set(download_subtitle),
                 download_ai_subtitle: sea_orm::Set(download_ai_subtitle),
@@ -9037,6 +9051,7 @@ pub async fn update_video_source_download_options_internal(
                 flat_folder,
                 split_chapters_after_download,
                 download_charge_videos,
+                sponsorblock_enabled,
                 download_danmaku,
                 download_subtitle,
                 download_ai_subtitle,
@@ -9066,6 +9081,7 @@ pub async fn update_video_source_download_options_internal(
                 .split_chapters_after_download
                 .unwrap_or(favorite.split_chapters_after_download);
             let download_charge_videos = params.download_charge_videos.unwrap_or(favorite.download_charge_videos);
+            let sponsorblock_enabled = params.sponsorblock_enabled.unwrap_or(favorite.sponsorblock_enabled);
             let download_danmaku = params.download_danmaku.unwrap_or(favorite.download_danmaku);
             let download_subtitle = params.download_subtitle.unwrap_or(favorite.download_subtitle);
             let download_ai_subtitle = params.download_ai_subtitle.unwrap_or(favorite.download_ai_subtitle);
@@ -9103,6 +9119,7 @@ pub async fn update_video_source_download_options_internal(
                 flat_folder: sea_orm::Set(flat_folder),
                 split_chapters_after_download: sea_orm::Set(split_chapters_after_download),
                 download_charge_videos: sea_orm::Set(download_charge_videos),
+                sponsorblock_enabled: sea_orm::Set(sponsorblock_enabled),
                 download_danmaku: sea_orm::Set(download_danmaku),
                 download_subtitle: sea_orm::Set(download_subtitle),
                 download_ai_subtitle: sea_orm::Set(download_ai_subtitle),
@@ -9131,6 +9148,7 @@ pub async fn update_video_source_download_options_internal(
                 flat_folder,
                 split_chapters_after_download,
                 download_charge_videos,
+                sponsorblock_enabled,
                 download_danmaku,
                 download_subtitle,
                 download_ai_subtitle,
@@ -9162,6 +9180,7 @@ pub async fn update_video_source_download_options_internal(
             let download_charge_videos = params
                 .download_charge_videos
                 .unwrap_or(submission.download_charge_videos);
+            let sponsorblock_enabled = params.sponsorblock_enabled.unwrap_or(submission.sponsorblock_enabled);
             let download_danmaku = params.download_danmaku.unwrap_or(submission.download_danmaku);
             let download_subtitle = params.download_subtitle.unwrap_or(submission.download_subtitle);
             let download_ai_subtitle = params.download_ai_subtitle.unwrap_or(submission.download_ai_subtitle);
@@ -9211,6 +9230,7 @@ pub async fn update_video_source_download_options_internal(
                 flat_folder: sea_orm::Set(flat_folder),
                 split_chapters_after_download: sea_orm::Set(split_chapters_after_download),
                 download_charge_videos: sea_orm::Set(download_charge_videos),
+                sponsorblock_enabled: sea_orm::Set(sponsorblock_enabled),
                 download_danmaku: sea_orm::Set(download_danmaku),
                 download_subtitle: sea_orm::Set(download_subtitle),
                 download_ai_subtitle: sea_orm::Set(download_ai_subtitle),
@@ -9245,6 +9265,7 @@ pub async fn update_video_source_download_options_internal(
                 flat_folder,
                 split_chapters_after_download,
                 download_charge_videos,
+                sponsorblock_enabled,
                 download_danmaku,
                 download_subtitle,
                 download_ai_subtitle,
@@ -9276,6 +9297,7 @@ pub async fn update_video_source_download_options_internal(
             let download_charge_videos = params
                 .download_charge_videos
                 .unwrap_or(watch_later.download_charge_videos);
+            let sponsorblock_enabled = params.sponsorblock_enabled.unwrap_or(watch_later.sponsorblock_enabled);
             let download_danmaku = params.download_danmaku.unwrap_or(watch_later.download_danmaku);
             let download_subtitle = params.download_subtitle.unwrap_or(watch_later.download_subtitle);
             let download_ai_subtitle = params.download_ai_subtitle.unwrap_or(watch_later.download_ai_subtitle);
@@ -9313,6 +9335,7 @@ pub async fn update_video_source_download_options_internal(
                 flat_folder: sea_orm::Set(flat_folder),
                 split_chapters_after_download: sea_orm::Set(split_chapters_after_download),
                 download_charge_videos: sea_orm::Set(download_charge_videos),
+                sponsorblock_enabled: sea_orm::Set(sponsorblock_enabled),
                 download_danmaku: sea_orm::Set(download_danmaku),
                 download_subtitle: sea_orm::Set(download_subtitle),
                 download_ai_subtitle: sea_orm::Set(download_ai_subtitle),
@@ -9341,6 +9364,7 @@ pub async fn update_video_source_download_options_internal(
                 flat_folder,
                 split_chapters_after_download,
                 download_charge_videos,
+                sponsorblock_enabled,
                 download_danmaku,
                 download_subtitle,
                 download_ai_subtitle,
@@ -9372,6 +9396,7 @@ pub async fn update_video_source_download_options_internal(
             let download_charge_videos = params
                 .download_charge_videos
                 .unwrap_or(video_source.download_charge_videos);
+            let sponsorblock_enabled = params.sponsorblock_enabled.unwrap_or(video_source.sponsorblock_enabled);
             let download_danmaku = params.download_danmaku.unwrap_or(video_source.download_danmaku);
             let download_subtitle = params.download_subtitle.unwrap_or(video_source.download_subtitle);
             let download_ai_subtitle = params.download_ai_subtitle.unwrap_or(video_source.download_ai_subtitle);
@@ -9409,6 +9434,7 @@ pub async fn update_video_source_download_options_internal(
                 flat_folder: sea_orm::Set(flat_folder),
                 split_chapters_after_download: sea_orm::Set(split_chapters_after_download),
                 download_charge_videos: sea_orm::Set(download_charge_videos),
+                sponsorblock_enabled: sea_orm::Set(sponsorblock_enabled),
                 download_danmaku: sea_orm::Set(download_danmaku),
                 download_subtitle: sea_orm::Set(download_subtitle),
                 download_ai_subtitle: sea_orm::Set(download_ai_subtitle),
@@ -9437,6 +9463,7 @@ pub async fn update_video_source_download_options_internal(
                 flat_folder,
                 split_chapters_after_download,
                 download_charge_videos,
+                sponsorblock_enabled,
                 download_danmaku,
                 download_subtitle,
                 download_ai_subtitle,
@@ -9544,6 +9571,7 @@ pub async fn update_video_source_download_options_internal(
                 flat_folder,
                 split_chapters_after_download: false,
                 download_charge_videos: false,
+                sponsorblock_enabled: false,
                 download_danmaku,
                 download_subtitle,
                 download_ai_subtitle: download_subtitle,

@@ -199,6 +199,11 @@ pub trait VideoSource {
         true
     }
 
+    /// 该视频源是否启用 SponsorBlock 广告剪辑（默认为 true；全局开关仍是总闸）
+    fn sponsorblock_enabled(&self) -> bool {
+        true
+    }
+
     /// 获取是否下载弹幕（默认为 true）
     fn download_danmaku(&self) -> bool {
         true // 默认实现：下载弹幕
@@ -559,6 +564,7 @@ pub async fn bangumi_from<'a>(
             flat_folder: model.flat_folder,
             split_chapters_after_download: model.split_chapters_after_download,
             download_charge_videos: model.download_charge_videos,
+            sponsorblock_enabled: model.sponsorblock_enabled,
             download_danmaku: model.download_danmaku,
             download_subtitle: model.download_subtitle,
             download_ai_subtitle: model.download_ai_subtitle,
@@ -609,6 +615,7 @@ pub async fn bangumi_from<'a>(
             flat_folder: false,
             split_chapters_after_download: false,
             download_charge_videos: true,
+            sponsorblock_enabled: true,
             download_danmaku: true,
             download_subtitle: true,
             download_ai_subtitle: true,
@@ -685,6 +692,7 @@ pub async fn pugv_from<'a>(
             flat_folder: model.flat_folder,
             split_chapters_after_download: model.split_chapters_after_download,
             download_charge_videos: model.download_charge_videos,
+            sponsorblock_enabled: model.sponsorblock_enabled,
             download_danmaku: model.download_danmaku,
             download_subtitle: model.download_subtitle,
             download_ai_subtitle: model.download_ai_subtitle,
@@ -728,6 +736,7 @@ pub async fn pugv_from<'a>(
             flat_folder: false,
             split_chapters_after_download: false,
             download_charge_videos: true,
+            sponsorblock_enabled: true,
             download_danmaku: true,
             download_subtitle: true,
             download_ai_subtitle: true,
@@ -796,6 +805,7 @@ pub async fn manga_from<'a>(
             flat_folder: model.flat_folder,
             split_chapters_after_download: model.split_chapters_after_download,
             download_charge_videos: model.download_charge_videos,
+            sponsorblock_enabled: model.sponsorblock_enabled,
             download_danmaku: model.download_danmaku,
             download_subtitle: model.download_subtitle,
             download_ai_subtitle: model.download_ai_subtitle,
@@ -833,6 +843,7 @@ pub async fn manga_from<'a>(
             flat_folder: false,
             split_chapters_after_download: false,
             download_charge_videos: true,
+            sponsorblock_enabled: true,
             download_danmaku: false,
             download_subtitle: false,
             download_ai_subtitle: false,
