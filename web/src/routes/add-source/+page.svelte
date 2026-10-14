@@ -134,38 +134,7 @@
 	let audioOnlyM4aOnly = false; // 仅音频时只保留m4a（不下载封面/nfo/弹幕/字幕）
 	let flatFolder = false; // 平铺目录模式
 	let splitChaptersAfterDownload = false; // 下载后按播放器章节切分为独立视频
-	// SponsorBlock 广告剪辑（全局配置 sponsor_block.enabled，切换即保存）
-	let sponsorBlockEnabled = false;
-	let sponsorBlockLoaded = false;
-	let sponsorBlockSaving = false;
-
-	async function loadSponsorBlockEnabled() {
-		try {
-			const res = await api.getConfig();
-			sponsorBlockEnabled = res.data?.sponsor_block?.enabled ?? false;
-			sponsorBlockLoaded = true;
-		} catch {
-			sponsorBlockLoaded = false;
-		}
-	}
-
-	async function toggleSponsorBlock(next: boolean) {
-		const prev = sponsorBlockEnabled;
-		sponsorBlockEnabled = next;
-		sponsorBlockSaving = true;
-		try {
-			const res = await api.updateConfig({ sponsor_block_enabled: next });
-			if (!res.data?.success) throw new Error(res.data?.message || '保存失败');
-			toast.success(next ? '已启用 SponsorBlock 广告剪辑' : '已关闭 SponsorBlock 广告剪辑', {
-				description: '全局设置，对所有 B 站视频源生效'
-			});
-		} catch (e) {
-			sponsorBlockEnabled = prev;
-			toast.error('保存 SponsorBlock 开关失败', { description: String((e as Error)?.message ?? e) });
-		} finally {
-			sponsorBlockSaving = false;
-		}
-	}
+	let sponsorBlockEnabled = true; // 该视频源启用 SponsorBlock 广告剪辑（默认开启；全局总闸在「设置 → SponsorBlock」）
 	let downloadChargeVideos = true; // 下载充电视频（默认开启）
 	let downloadDanmaku = true; // 下载弹幕（默认开启）
 	let downloadSubtitle = true; // 下载字幕（默认开启）
@@ -790,7 +759,6 @@
 	}
 
 	onMount(async () => {
-		void loadSponsorBlockEnabled();
 		const requestedPlatform = $page.url.searchParams.get('platform');
 		sourcePlatform =
 			requestedPlatform === 'youtube'
@@ -1699,6 +1667,7 @@
 			flat_folder: flatFolder,
 			split_chapters_after_download: splitChaptersAfterDownload,
 			download_charge_videos: downloadChargeVideos,
+			sponsorblock_enabled: sponsorBlockEnabled,
 			download_danmaku: downloadDanmaku,
 			download_subtitle: downloadSubtitle,
 			download_ai_subtitle: downloadAiSubtitle,
@@ -1935,6 +1904,7 @@
 			flatFolder = false;
 			splitChaptersAfterDownload = false;
 			downloadChargeVideos = true;
+			sponsorBlockEnabled = true;
 			downloadDanmaku = true;
 			downloadSubtitle = true;
 			downloadAiSubtitle = true;
@@ -3712,6 +3682,7 @@
 						flat_folder: flatFolder,
 						split_chapters_after_download: splitChaptersAfterDownload,
 						download_charge_videos: downloadChargeVideos,
+						sponsorblock_enabled: sponsorBlockEnabled,
 						download_danmaku: downloadDanmaku,
 						download_subtitle: downloadSubtitle,
 						download_ai_subtitle: downloadAiSubtitle,
@@ -4852,7 +4823,7 @@
 									</label>
 								</div>
 
-								<!-- SponsorBlock 广告剪辑（全局） -->
+								<!-- SponsorBlock 广告剪辑（按视频源） -->
 								<div
 									class="flex items-center justify-between rounded-md border border-gray-200 bg-white px-3 py-2 dark:border-gray-600 dark:bg-gray-700"
 								>
@@ -4883,7 +4854,7 @@
 												</p>
 											{:else}
 												<p class="text-[10px] text-gray-400 dark:text-gray-500">
-													全局开关，切换即保存；类别、模式等详细设置在「设置 → SponsorBlock」
+													仅对该视频源生效；需同时开启「设置 → SponsorBlock」全局总开关
 												</p>
 											{/if}
 										</div>
@@ -4891,13 +4862,11 @@
 									<label class="relative inline-flex cursor-pointer items-center">
 										<input
 											type="checkbox"
-											checked={sponsorBlockEnabled}
-											disabled={!sponsorBlockLoaded || sponsorBlockSaving}
-											onchange={(e) => toggleSponsorBlock(e.currentTarget.checked)}
+											bind:checked={sponsorBlockEnabled}
 											class="peer sr-only"
 										/>
 										<div
-											class="peer h-5 w-9 rounded-full bg-gray-300 peer-checked:bg-orange-600 peer-focus:ring-2 peer-focus:ring-orange-500 peer-focus:outline-none peer-disabled:cursor-not-allowed after:absolute after:top-[2px] after:left-[2px] after:h-4 after:w-4 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white dark:bg-gray-600 dark:peer-checked:bg-orange-500"
+											class="peer h-5 w-9 rounded-full bg-gray-300 peer-checked:bg-orange-600 peer-focus:ring-2 peer-focus:ring-orange-500 peer-focus:outline-none after:absolute after:top-[2px] after:left-[2px] after:h-4 after:w-4 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white dark:bg-gray-600 dark:peer-checked:bg-orange-500"
 										></div>
 									</label>
 								</div>
