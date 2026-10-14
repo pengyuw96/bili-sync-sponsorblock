@@ -1811,6 +1811,7 @@ mod tests {
             flat_folder: Set(false),
             split_chapters_after_download: Set(false),
             download_charge_videos: Set(true),
+            sponsorblock_enabled: Set(true),
             download_danmaku: Set(true),
             download_subtitle: Set(true),
             download_ai_subtitle: Set(true),

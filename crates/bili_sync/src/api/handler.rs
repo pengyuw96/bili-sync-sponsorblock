@@ -1681,6 +1681,7 @@ mod queue_sse_tests {
             flat_folder: Set(false),
             split_chapters_after_download: Set(false),
             download_charge_videos: Set(true),
+            sponsorblock_enabled: Set(true),
             download_danmaku: Set(true),
             download_subtitle: Set(true),
             download_ai_subtitle: Set(true),
@@ -1735,6 +1736,7 @@ mod queue_sse_tests {
             flat_folder: Set(false),
             split_chapters_after_download: Set(false),
             download_charge_videos: Set(true),
+            sponsorblock_enabled: Set(true),
             download_danmaku: Set(true),
             download_subtitle: Set(true),
             download_ai_subtitle: Set(true),
@@ -1778,6 +1780,7 @@ mod queue_sse_tests {
             flat_folder: Set(false),
             split_chapters_after_download: Set(false),
             download_charge_videos: Set(true),
+            sponsorblock_enabled: Set(true),
             download_danmaku: Set(true),
             download_subtitle: Set(true),
             download_ai_subtitle: Set(true),
@@ -1819,6 +1822,7 @@ mod queue_sse_tests {
             flat_folder: Set(false),
             split_chapters_after_download: Set(false),
             download_charge_videos: Set(true),
+            sponsorblock_enabled: Set(true),
             download_danmaku: Set(true),
             download_subtitle: Set(true),
             download_ai_subtitle: Set(true),
@@ -1957,6 +1961,7 @@ mod queue_sse_tests {
         submission::Entity::update(submission::ActiveModel {
             id: Unchanged(id),
             download_charge_videos: Set(enabled),
+            sponsorblock_enabled: Set(true),
             ..Default::default()
         })
         .exec(db)
@@ -6206,6 +6211,7 @@ pub async fn add_video_source_internal(
                 split_chapters_after_download: sea_orm::Set(false),
                 // 漫画没有充电 / 弹幕 / 字幕概念，强制关闭避免走通用链路
                 download_charge_videos: sea_orm::Set(false),
+                sponsorblock_enabled: sea_orm::Set(true),
                 download_danmaku: sea_orm::Set(false),
                 download_subtitle: sea_orm::Set(false),
                 download_ai_subtitle: sea_orm::Set(false),
