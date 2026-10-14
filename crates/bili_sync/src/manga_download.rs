@@ -559,7 +559,7 @@ async fn persist_page_progress(
     connection: &DatabaseConnection,
     packaged: bool,
 ) -> Result<()> {
-    let complete: u32 = PageStatus::from([STATUS_OK; 5]).into();
+    let complete: u32 = PageStatus::from([STATUS_OK; 6]).into();
     let cbz_string = cbz_path.to_string_lossy().to_string();
     for (index, page_info) in fetched.iter().enumerate() {
         let pid = index as i32 + 1;
