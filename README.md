@@ -6,6 +6,24 @@
 - 上游代码基线：bili-sync-up **v3.1.5**（`a73c2fca`）
 - 非官方版本，问题请勿反馈到上游。
 
+## 新功能一览（New features）
+
+本 fork 在上游基础上新增/改进了以下功能：
+
+- **按视频源单独开关 SponsorBlock**：每个收藏夹 / 合集 / UP 主投稿 / 稍后再看都能单独启用或关闭剪辑，新建视频源时也能直接设置。
+- **关键帧裁剪（stable）**：默认策略，流复制、不重新编码，切点吸附到关键帧，速度快、画质无损。
+- **智能精确裁剪（BETA）**：只把每个切点附近到最近关键帧之间的几秒重新编码，其余部分流复制，在几乎不损失画质的前提下做到帧级精确。
+  - 优先调用核显硬件编码：`hevc_vaapi` → `hevc_qsv` → `libx265` → 自动回退到 stable。
+  - 主要面向 H.265（HEVC）视频，也支持 H.264；遇到 open-GOP 等不安全的片源会自动回退。
+  - 低 CPU 占用：`nice 10`、`-threads 2`、同一时间只剪一个视频。
+  - 在设置页「关键帧裁剪策略」中选择（带 BETA 标记）。
+- **字幕 / 弹幕 / 章节时间轴对齐**：与视频使用同一组实际删除区间，剪辑后再按 ffprobe 实测时长修正章节和 NFO。
+- **以非 root 用户运行**：容器入口脚本只用 root 给容器内的 `/dev/dri` 核显设备授权（宿主机设备权限不变），随后切换到 `PUID`/`PGID` 运行，下载的文件直接属于对应用户和用户组（适配 QNAP / 群晖等 NAS）。
+
+**致谢**：[NeeYoonc/bili-sync-up](https://github.com/NeeYoonc/bili-sync-up)（上游代码）、[hanydd/BilibiliSponsorBlock](https://github.com/hanydd/BilibiliSponsorBlock)（片段数据与智能剪切思路参考）。
+
+*English summary: per-source SponsorBlock toggle; lossless keyframe cut (stable); BETA smart cut that re-encodes only the seconds around each cut using the iGPU (hevc_vaapi → hevc_qsv → libx265 → stable fallback), H.265-focused, low CPU (nice, 2 threads, one job at a time); subtitle/danmaku/chapter timeline alignment; runs as non-root PUID/PGID with iGPU access set up by the entrypoint.*
+
 ## 一、SponsorBlock 剪辑（核心功能）
 
 视频下载合并完成后，如果开启了 `sponsor_block.enabled`，会按下面的流程处理：
