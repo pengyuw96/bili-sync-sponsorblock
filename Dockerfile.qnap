@@ -1,34 +1,68 @@
-# Simple deploy image for QNAP Container Station (sponsorblock fork 3.1.5.1)
-# Runtime ffmpeg comes from Alpine 3.22 community (6.1.2). Do not bump the base past upstream.
-# Binary is statically linked musl; runtime needs ffmpeg + certs + tzdata.
-FROM alpine:3.22
-
-WORKDIR /app
-
-RUN apk add --no-cache \
-    ca-certificates \
-    tzdata \
-    ffmpeg \
+# Simple deploy image for QNAP Container Station (sponsorblock fork 3.1.5.1)
+
+# Runtime ffmpeg comes from Alpine 3.22 community (6.1.2). Do not bump the base past upstream.
+# Optional for H.265 smart-cut iGPU: mount /dev/dri into the container (see NOTES.md).
+
+# Binary is statically linked musl; runtime needs ffmpeg + certs + tzdata.
+
+FROM alpine:3.22
+
+
+
+WORKDIR /app
+
+
+
+RUN apk add --no-cache \
+
+    ca-certificates \
+
+    tzdata \
+
+    ffmpeg \
+
     quickjs \
-    sqlite \
-    nodejs \
-    && rm -rf /var/cache/apk/*
-
-COPY bili-sync-rs-Linux-x86_64-musl.tar.gz /tmp/
-RUN tar xzvf /tmp/bili-sync-rs-Linux-x86_64-musl.tar.gz -C /app \
-    && chmod +x /app/bili-sync-rs \
-    && rm -f /tmp/bili-sync-rs-Linux-*.tar.gz \
-    && date -u +"%Y-%m-%dT%H:%M:%SZ" > /app/image-built-at.txt \
-    && echo -n "sponsorblock" > /app/release-channel.txt
-
-ENV LANG=zh_CN.UTF-8 \
-    TZ=Asia/Shanghai \
-    HOME=/app \
-    BILI_SYNC_CONTAINER=1 \
-    BILI_SYNC_YTDLP_JS_RUNTIME=/usr/bin/qjs \
-    RUST_BACKTRACE=1 \
-    RUST_LOG=None,bili_sync=info
-
-EXPOSE 12345
-VOLUME ["/app/.config/bili-sync"]
-ENTRYPOINT ["/app/bili-sync-rs"]
+    sqlite \
+
+    nodejs \
+
+    && rm -rf /var/cache/apk/*
+
+
+
+COPY bili-sync-rs-Linux-x86_64-musl.tar.gz /tmp/
+
+RUN tar xzvf /tmp/bili-sync-rs-Linux-x86_64-musl.tar.gz -C /app \
+
+    && chmod +x /app/bili-sync-rs \
+
+    && rm -f /tmp/bili-sync-rs-Linux-*.tar.gz \
+
+    && date -u +"%Y-%m-%dT%H:%M:%SZ" > /app/image-built-at.txt \
+
+    && echo -n "sponsorblock" > /app/release-channel.txt
+
+
+
+ENV LANG=zh_CN.UTF-8 \
+
+    TZ=Asia/Shanghai \
+
+    HOME=/app \
+
+    BILI_SYNC_CONTAINER=1 \
+
+    BILI_SYNC_YTDLP_JS_RUNTIME=/usr/bin/qjs \
+
+    RUST_BACKTRACE=1 \
+
+    RUST_LOG=None,bili_sync=info
+
+
+
+EXPOSE 12345
+
+VOLUME ["/app/.config/bili-sync"]
+
+ENTRYPOINT ["/app/bili-sync-rs"]
+

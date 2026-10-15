@@ -135,3 +135,11 @@ ffmpeg -i /path/to/media.mp4 2>&1 | grep -A2 Chapter
   The earlier poster.jpg change was reverted.
 - SponsorBlock plan is now hidden: `.{stem}.sponsorblock.json` (legacy visible name is renamed on access).
 - `deploy/migrate-episode-names.sh` renames existing folders and emits page.path SQL.
+
+## Smart cut (beta) — HEVC / iGPU
+
+- **Feasible** for H.264 and **closed-GOP** H.265 Main 8-bit via MPEG-TS concat of re-encoded boundary slivers + stream-copied mid. Open-GOP H.265 mid-copy leaves dangling POCs; decode check fails → automatic stable fallback.
+- **Encoder order (H.265):** `hevc_qsv` → `hevc_vaapi` → `libx265` veryfast. Runtime probe; no `/dev/dri` → software.
+- **NAS container (not applied yet):** add device `/dev/dri` (e.g. `- /dev/dri:/dev/dri`), ensure the process user can open `renderD*` (often group `render` / `video`). Image ffmpeg must list `hevc_qsv` or `hevc_vaapi` (Alpine 3.22 stock ffmpeg 6.1.2 links libx265 + libvpl; confirm QSV inside the running container before relying on HW).
+- **Do not bump to ffmpeg 8** for this feature alone: Alpine 3.22 pins 6.1.2; edge 8.x is a distro jump. Stream-copy/concat are I/O-bound; short re-encodes are encoder-bound (x265 / QSV), not demuxer-version-bound.
+

@@ -5680,7 +5680,7 @@
 							<option value="beta_smart">Beta 智能裁剪（只重编码切点附近一小段，切点精确到帧）</option>
 						</select>
 						<p class="text-muted-foreground text-xs">
-							Beta：仅支持 H.264，每个切点重编码到相邻关键帧（低优先级、2 线程、同时只裁一个），其余流复制；音频按精确时间重编码。HEVC/AV1 或校验失败会自动回退稳定模式。
+							Beta：H.264 与 H.265（Main 8-bit）按切点只重编码到相邻关键帧，其余流复制；音频按精确时间重编码。H.265 优先用核显（hevc_qsv / hevc_vaapi），否则 libx265；需容器挂载 /dev/dri。Open-GOP 的 H.265 或校验失败会自动回退稳定模式。低优先级、软件编码 2 线程、同时只裁一个。
 						</p>
 					</div>
 				{/if}
