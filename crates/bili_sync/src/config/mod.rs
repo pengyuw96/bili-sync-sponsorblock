@@ -586,6 +586,11 @@ pub struct SponsorBlockConfig {
     /// 旧配置里的 keep_original / original_suffix 已移除，反序列化时会被忽略。
     #[serde(default = "default_sponsor_block_cut_mode")]
     pub cut_mode: String,
+    /// 关键帧模式下的裁剪策略："stable"（默认，切点吸附关键帧，纯流复制）
+    /// 或 "beta_smart"（Beta 智能裁剪：只重编码切点到相邻关键帧的一小段，其余流复制，切点精确到帧；
+    /// 仅 H.264，失败自动回退 stable）。cut_mode = accurate 时本项不生效。
+    #[serde(default = "default_sponsor_block_cut_strategy")]
+    pub cut_strategy: String,
     /// 最短可裁剪片段（秒）
     #[serde(default = "default_sponsor_block_min_segment")]
     pub min_segment_seconds: f64,
@@ -628,6 +633,10 @@ fn default_sponsor_block_action_types() -> Vec<String> {
     vec!["skip".to_string()]
 }
 
+fn default_sponsor_block_cut_strategy() -> String {
+    "stable".to_string()
+}
+
 fn default_sponsor_block_cut_mode() -> String {
     "keyframe".to_string()
 }
@@ -662,6 +671,7 @@ impl Default for SponsorBlockConfig {
             mark_categories: default_sponsor_block_mark_categories(),
             action_types: default_sponsor_block_action_types(),
             cut_mode: default_sponsor_block_cut_mode(),
+            cut_strategy: default_sponsor_block_cut_strategy(),
             min_segment_seconds: default_sponsor_block_min_segment(),
             min_keep_gap_seconds: default_sponsor_block_min_keep_gap(),
             api_timeout_ms: default_sponsor_block_api_timeout(),

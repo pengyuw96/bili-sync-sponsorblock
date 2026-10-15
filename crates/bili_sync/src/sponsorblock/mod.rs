@@ -15,6 +15,7 @@ mod ffmpeg_chapters;
 mod ffmpeg_cut;
 pub mod health;
 mod model;
+pub mod smart_cut;
 pub mod sidecars;
 pub mod timeline;
 
@@ -237,6 +238,53 @@ pub async fn maybe_cut_sponsor_segments(
                     }
                     }
                 };
+                // BETA smart cut: exact boundaries, re-encode only the GOP slivers at each cut.
+                // Any failure falls back to the stable keyframe-snap cut below.
+                let mut smart_done = false;
+                if cut_mode == CutMode::Keyframe
+                    && config.cut_strategy.trim() == "beta_smart"
+                    && !keyframes.is_empty()
+                {
+                    let exact_removes = removes_from_keeps(&keep, duration);
+                    if !exact_removes.is_empty() {
+                        let parent = page_path.parent().unwrap_or_else(|| Path::new("."));
+                        let ext = page_path.extension().and_then(|s| s.to_str()).unwrap_or("mp4");
+                        let tmp_out = parent.join(format!(
+                            ".bili-sync-sponsor-smartcut-{}-{}.{}",
+                            std::process::id(),
+                            cid,
+                            ext
+                        ));
+                        let _cut_permit = acquire_cut_permit().await;
+                        match smart_cut::smart_cut(page_path, &tmp_out, &keep, &keyframes, duration).await {
+                            Ok(stats) => match atomic_replace(page_path, &tmp_out).await {
+                                Ok(()) => {
+                                    info!(
+                                        "SponsorBlock: beta smart cut {} cid={} — exact keep {} parts, re-encoded {:.2}s",
+                                        bvid, cid, keep.len(), stats.encoded_secs
+                                    );
+                                    removed_approx_secs = exact_removes.iter().map(|(s, e)| (e - s).max(0.0)).sum();
+                                    did_cut = true;
+                                    keep_parts = keep.len();
+                                    applied_removes = exact_removes;
+                                    smart_done = true;
+                                }
+                                Err(e) => {
+                                    let _ = tokio::fs::remove_file(&tmp_out).await;
+                                    warn!("SponsorBlock beta smart cut replace failed, falling back to stable cut: {:#}", e);
+                                }
+                            },
+                            Err(e) => {
+                                let _ = tokio::fs::remove_file(&tmp_out).await;
+                                warn!(
+                                    "SponsorBlock beta smart cut failed for {} cid={}, falling back to stable keyframe cut: {:#}",
+                                    bvid, cid, e
+                                );
+                            }
+                        }
+                    }
+                }
+                if !smart_done {
                 let mut keep = snap_keep_ranges_to_keyframes(&keep, &keyframes);
                 // Use the complement of the ranges ffmpeg will keep. Short gaps that
                 // compute_keep_ranges absorbed (and GOP-sized removes collapsed by snap)
@@ -330,6 +378,7 @@ pub async fn maybe_cut_sponsor_segments(
                     }
                 }
                 } // end non-empty after snap
+                } // end stable path (!smart_done)
             }
         }
     }

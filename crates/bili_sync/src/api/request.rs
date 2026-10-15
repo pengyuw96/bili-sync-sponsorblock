@@ -369,6 +369,8 @@ pub struct UpdateConfigRequest {
     pub sponsor_block_categories: Option<Vec<String>>,
     pub sponsor_block_mark_categories: Option<Vec<String>>,
     pub sponsor_block_cut_mode: Option<String>,
+    #[serde(default)]
+    pub sponsor_block_cut_strategy: Option<String>,
     pub sponsor_block_fail_open: Option<bool>,
     // Emby/Jellyfin 扫描通知
     pub media_server_enabled: Option<bool>,

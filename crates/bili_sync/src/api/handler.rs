@@ -11336,6 +11336,7 @@ pub async fn get_config() -> Result<ApiResponse<crate::api::response::ConfigResp
                 mark_categories: config.sponsor_block.mark_categories.clone(),
                 action_types: config.sponsor_block.action_types.clone(),
                 cut_mode: config.sponsor_block.cut_mode.clone(),
+                cut_strategy: config.sponsor_block.cut_strategy.clone(),
                 min_segment_seconds: config.sponsor_block.min_segment_seconds,
                 min_keep_gap_seconds: config.sponsor_block.min_keep_gap_seconds,
                 api_timeout_ms: config.sponsor_block.api_timeout_ms,
@@ -13476,6 +13477,16 @@ pub async fn update_config_internal(
         };
         if config.sponsor_block.cut_mode != cut_mode {
             config.sponsor_block.cut_mode = cut_mode.to_string();
+            updated_fields.push("sponsor_block");
+        }
+    }
+    if let Some(strategy) = params.sponsor_block_cut_strategy.as_deref() {
+        let strategy = match strategy.trim() {
+            "beta_smart" => "beta_smart",
+            _ => "stable",
+        };
+        if config.sponsor_block.cut_strategy != strategy {
+            config.sponsor_block.cut_strategy = strategy.to_string();
             updated_fields.push("sponsor_block");
         }
     }

@@ -499,6 +499,7 @@
 	let sponsorBlockCategories: string[] = ['sponsor', 'padding'];
 	let sponsorBlockMarkCategories: string[] = [];
 	let sponsorBlockCutMode = 'keyframe';
+	let sponsorBlockCutStrategy = 'stable';
 	let sponsorBlockFailOpen = true;
 	let sponsorBlockServerAddress = 'https://www.bsbsb.top';
 	let sponsorBlockMirrorsText = 'https://www.bsbsb.xyz';
@@ -950,6 +951,7 @@
 				)
 			: [];
 		sponsorBlockCutMode = config.sponsor_block?.cut_mode ?? 'keyframe';
+		sponsorBlockCutStrategy = config.sponsor_block?.cut_strategy ?? 'stable';
 		sponsorBlockFailOpen = config.sponsor_block?.fail_open ?? true;
 		sponsorBlockServerAddress = config.sponsor_block?.server_address || 'https://www.bsbsb.top';
 		sponsorBlockMirrorsText = (config.sponsor_block?.mirror_server_addresses || []).join(', ');
@@ -1932,6 +1934,7 @@
 			sponsor_block_categories: categories,
 			sponsor_block_mark_categories: markCategories,
 			sponsor_block_cut_mode: sponsorBlockCutMode,
+			sponsor_block_cut_strategy: sponsorBlockCutStrategy,
 			sponsor_block_fail_open: sponsorBlockFailOpen,
 			sponsor_block_server_address: sponsorBlockServerAddress.trim(),
 			sponsor_block_mirror_server_addresses: mirrors
@@ -5659,6 +5662,28 @@
 						<option value="accurate">精确（重新编码视频，切点精确到帧，耗 CPU）</option>
 					</select>
 				</div>
+				{#if sponsorBlockCutMode === 'keyframe'}
+					<div class="space-y-2">
+						<Label for="sponsor-block-cut-strategy" class="flex items-center gap-2 text-sm font-medium">
+							关键帧裁剪策略
+							<span
+								class="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+								>BETA</span
+							>
+						</Label>
+						<select
+							id="sponsor-block-cut-strategy"
+							bind:value={sponsorBlockCutStrategy}
+							class="border-input bg-background h-9 w-full rounded-md border px-3 text-sm"
+						>
+							<option value="stable">稳定（默认，切点吸附关键帧，纯流复制）</option>
+							<option value="beta_smart">Beta 智能裁剪（只重编码切点附近一小段，切点精确到帧）</option>
+						</select>
+						<p class="text-muted-foreground text-xs">
+							Beta：仅支持 H.264，每个切点重编码到相邻关键帧（低优先级、2 线程、同时只裁一个），其余流复制；音频按精确时间重编码。HEVC/AV1 或校验失败会自动回退稳定模式。
+						</p>
+					</div>
+				{/if}
 				<p class="text-muted-foreground text-xs">
 					裁剪后只保留剪辑后的视频、字幕和元数据，不再保留原片。
 				</p>

@@ -765,6 +765,7 @@ export interface SponsorBlockConfig {
 	mark_categories: string[];
 	action_types: string[];
 	cut_mode: string;
+	cut_strategy?: string; // stable | beta_smart
 	min_segment_seconds: number;
 	min_keep_gap_seconds: number;
 	api_timeout_ms: number;
@@ -929,6 +930,7 @@ export interface UpdateConfigRequest {
 	sponsor_block_categories?: string[];
 	sponsor_block_mark_categories?: string[];
 	sponsor_block_cut_mode?: string;
+	sponsor_block_cut_strategy?: string;
 	sponsor_block_fail_open?: boolean;
 	// Emby/Jellyfin 扫描通知
 	media_server_enabled?: boolean;

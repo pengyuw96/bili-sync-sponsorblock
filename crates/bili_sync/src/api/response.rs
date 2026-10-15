@@ -1354,6 +1354,7 @@ pub struct SponsorBlockConfigResponse {
     pub mark_categories: Vec<String>,
     pub action_types: Vec<String>,
     pub cut_mode: String,
+    pub cut_strategy: String,
     pub min_segment_seconds: f64,
     pub min_keep_gap_seconds: f64,
     pub api_timeout_ms: u64,

@@ -10,7 +10,16 @@ use anyhow::{anyhow, bail, Context, Result};
 use tokio::fs;
 use tracing::{debug, info};
 
-use crate::downloader::resolve_media_tool_path;
+fn resolve_media_tool_path(name: &str) -> std::path::PathBuf {
+    #[cfg(test)]
+    {
+        std::path::PathBuf::from(name)
+    }
+    #[cfg(not(test))]
+    {
+        crate::downloader::resolve_media_tool_path(name)
+    }
+}
 
 /// How each keep interval is extracted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

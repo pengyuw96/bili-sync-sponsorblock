@@ -2487,6 +2487,7 @@ impl ConfigTaskQueue {
                 sponsor_block_categories: None,
                 sponsor_block_mark_categories: None,
                 sponsor_block_cut_mode: None,
+                sponsor_block_cut_strategy: None,
                 sponsor_block_fail_open: None,
                 media_server_enabled: None,
                 media_server_type: None,
