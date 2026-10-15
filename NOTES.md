@@ -156,3 +156,10 @@ ffmpeg -i /path/to/media.mp4 2>&1 | grep -A2 Chapter
 - Open GOP (x264 open-gop non-IDR I, HEVC CRA, detected via `trace_headers` on
   keyframes + leading-picture scan) is never a copy start; if that pushes re-encode
   above 50 % of the keep, smart cut refuses → stable.
+
+## run as 2601:1113 via root-only entrypoint
+- `/app/entrypoint.sh` (deploy/qnap-entrypoint.sh): as root, `chgrp $PGID /dev/dri/renderD*` + `chmod 660` on the container's own
+  device node (docker `--device` creates a separate node; host node stays 600 admin:administrators), `umask 002`, then
+  `exec su-exec $PUID:$PGID /app/bili-sync-rs`. Files are created as 2601:1113 directly.
+- Run with `--user 0:0 --cap-drop ALL --cap-add CHOWN --cap-add FOWNER --cap-add SETUID --cap-add SETGID --security-opt no-new-privileges`.
+  After su-exec the app has no effective caps. The PUID/PGID ownership fixer is a no-op when not root.

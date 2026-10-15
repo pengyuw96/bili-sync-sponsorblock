@@ -1,4 +1,4 @@
-# Simple deploy image for QNAP Container Station (sponsorblock fork 3.1.5.1)
+# Simple deploy image for QNAP Container Station (sponsorblock fork: Intel VAAPI/QSV runtime, root-only entrypoint -> su-exec PUID:PGID)
 # Runtime ffmpeg comes from Alpine 3.22 community (6.1.2). Do not bump the base past upstream.
 # Optional for H.265 smart-cut iGPU: mount /dev/dri into the container (see NOTES.md).
 # Binary is statically linked musl; runtime needs ffmpeg + certs + tzdata.
@@ -10,14 +10,20 @@ RUN apk add --no-cache \
     ca-certificates \
     tzdata \
     ffmpeg \
+    intel-media-driver \
+    intel-media-sdk \
+    onevpl-libs \
+    libva-utils \
+    su-exec \
     quickjs \
     sqlite \
     nodejs \
     && rm -rf /var/cache/apk/*
 
 COPY bili-sync-rs-Linux-x86_64-musl.tar.gz /tmp/
+COPY qnap-entrypoint.sh /app/entrypoint.sh
 RUN tar xzvf /tmp/bili-sync-rs-Linux-x86_64-musl.tar.gz -C /app \
-    && chmod +x /app/bili-sync-rs \
+    && chmod +x /app/bili-sync-rs /app/entrypoint.sh \
     && rm -f /tmp/bili-sync-rs-Linux-*.tar.gz \
     && date -u +"%Y-%m-%dT%H:%M:%SZ" > /app/image-built-at.txt \
     && echo -n "sponsorblock" > /app/release-channel.txt
@@ -28,8 +34,10 @@ ENV LANG=zh_CN.UTF-8 \
     BILI_SYNC_CONTAINER=1 \
     BILI_SYNC_YTDLP_JS_RUNTIME=/usr/bin/qjs \
     RUST_BACKTRACE=1 \
-    RUST_LOG=None,bili_sync=info
+    RUST_LOG=None,bili_sync=info \
+    PUID=2601 \
+    PGID=1113
 
 EXPOSE 12345
 VOLUME ["/app/.config/bili-sync"]
-ENTRYPOINT ["/app/bili-sync-rs"]
+ENTRYPOINT ["/app/entrypoint.sh"]
