@@ -1,30 +1,210 @@
+<div align="center">
+
 # bili-sync-sponsorblock
 
-基于 [NeeYoonc/bili-sync-up](https://github.com/NeeYoonc/bili-sync-up)（上游 [amtoaer/bili-sync](https://github.com/amtoaer/bili-sync)）的社区 fork，主要加入 [BilibiliSponsorBlock](https://github.com/hanydd/BilibiliSponsorBlock) 广告片段剪辑，并针对 Emby / Jellyfin 媒体库做了适配。
+**B 站视频自动下载 + SponsorBlock 广告剪辑 + 核显智能精确裁剪，为 NAS 与 Emby / Jellyfin 而生**
 
-- 当前版本：**v3.1.5.1**（Cargo 包版本号为 `3.1.5`，Cargo 不支持四段版本号）
-- 上游代码基线：bili-sync-up **v3.1.5**（`a73c2fca`）
-- 非官方版本，问题请勿反馈到上游。
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./License)
+[![Last commit](https://img.shields.io/github/last-commit/pengyuw96/bili-sync-sponsorblock)](https://github.com/pengyuw96/bili-sync-sponsorblock/commits/main)
+[![Upstream](https://img.shields.io/badge/upstream-bili--sync--up%20v3.1.5-blue)](https://github.com/NeeYoonc/bili-sync-up)
+[![Docker](https://img.shields.io/badge/docker-self--build-2496ED?logo=docker&logoColor=white)](#-快速开始)
+[![Platform](https://img.shields.io/badge/platform-linux%2Famd64-lightgrey)](#-硬件与兼容性)
+[![iGPU](https://img.shields.io/badge/iGPU-VAAPI%20%7C%20QSV-0071C5?logo=intel&logoColor=white)](#-智能裁剪原理beta)
 
-## 新功能一览（New features）
+</div>
 
-本 fork 在上游基础上新增/改进了以下功能：
+基于 [NeeYoonc/bili-sync-up](https://github.com/NeeYoonc/bili-sync-up)（上游 [amtoaer/bili-sync](https://github.com/amtoaer/bili-sync)）的社区 fork：在下载完成后按 [BilibiliSponsorBlock](https://github.com/hanydd/BilibiliSponsorBlock) 数据自动剪掉恰饭片段，并提供只重编码切点附近几秒、可调用 Intel 核显的 **智能精确裁剪（BETA）**。
 
-- **按视频源单独开关 SponsorBlock**：每个收藏夹 / 合集 / UP 主投稿 / 稍后再看都能单独启用或关闭剪辑，新建视频源时也能直接设置。
-- **关键帧裁剪（stable）**：默认策略，流复制、不重新编码，切点吸附到关键帧，速度快、画质无损。
-- **智能精确裁剪（BETA）**：只把每个切点附近到最近关键帧之间的几秒重新编码，其余部分流复制，在几乎不损失画质的前提下做到帧级精确。
-  - 优先调用核显硬件编码：`hevc_vaapi` → `hevc_qsv` → `libx265` → 自动回退到 stable。
-  - 主要面向 H.265（HEVC）视频，也支持 H.264；遇到 open-GOP 等不安全的片源会自动回退。
-  - 低 CPU 占用：`nice 10`、`-threads 2`、同一时间只剪一个视频。
-  - 在设置页「关键帧裁剪策略」中选择（带 BETA 标记）。
-- **字幕 / 弹幕 / 章节时间轴对齐**：与视频使用同一组实际删除区间，剪辑后再按 ffprobe 实测时长修正章节和 NFO。
-- **以非 root 用户运行**：容器入口脚本只用 root 给容器内的 `/dev/dri` 核显设备授权（宿主机设备权限不变），随后切换到 `PUID`/`PGID` 运行，下载的文件直接属于对应用户和用户组（适配 QNAP / 群晖等 NAS）。
+> 当前版本 **v3.1.5.1**（Cargo 包版本 `3.1.5`，Cargo 不支持四段版本号），上游基线 bili-sync-up **v3.1.5**。非官方版本，问题请勿反馈到上游。本仓库不发布 Release / 镜像，需要自行编译。
 
-**致谢**：[NeeYoonc/bili-sync-up](https://github.com/NeeYoonc/bili-sync-up)（上游代码）、[hanydd/BilibiliSponsorBlock](https://github.com/hanydd/BilibiliSponsorBlock)（片段数据与智能剪切思路参考）。
+## 📑 目录
 
-*English summary: per-source SponsorBlock toggle; lossless keyframe cut (stable); BETA smart cut that re-encodes only the seconds around each cut using the iGPU (hevc_vaapi → hevc_qsv → libx265 → stable fallback), H.265-focused, low CPU (nice, 2 threads, one job at a time); subtitle/danmaku/chapter timeline alignment; runs as non-root PUID/PGID with iGPU access set up by the entrypoint.*
+- [✨ 功能亮点](#-功能亮点)
+- [🧠 智能裁剪原理（BETA）](#-智能裁剪原理beta)
+- [⚖️ Stable 与 Beta 对比](#️-stable-与-beta-对比)
+- [🖥️ 硬件与兼容性](#️-硬件与兼容性)
+- [🚀 快速开始](#-快速开始)
+- [⚙️ 配置参考](#️-配置参考)
+- [🔁 SponsorBlock 处理流程](#-sponsorblock-处理流程)
+- [❓ 常见问题](#-常见问题)
+- [🔀 与上游的区别](#-与上游的区别)
+- [🗺️ 路线图与已知问题](#️-路线图与已知问题)
+- [🙏 致谢与许可](#-致谢与许可)
 
-## 一、SponsorBlock 剪辑（核心功能）
+## ✨ 功能亮点
+
+- ✂️ **SponsorBlock 自动剪辑**：下载合并后拉取 BilibiliSponsorBlock 片段，剪掉恰饭 / 片头片尾等类别，原子替换原文件。
+- 🎛️ **按视频源单独开关**：每个收藏夹、合集、UP 主投稿、稍后再看都可以单独启用或关闭剪辑，新建视频源时即可设置。
+- 🔑 **关键帧裁剪（stable，默认）**：纯流复制，不重新编码，画质无损、速度快，切点吸附到关键帧。
+- 🎯 **智能精确裁剪（BETA）**：只重编码每个切点到相邻关键帧之间的几秒，其余部分流复制，切点精确到帧。
+- ⚡ **核显硬件编码**：编码器按 `hevc_vaapi` → `hevc_qsv` → `libx265` 依次尝试，全部失败则自动回退 stable。
+- 🎞️ **以 H.265 为主**：针对 B 站 HEVC 片源优化，也支持 H.264；open-GOP 关键帧（H.264 非 IDR / HEVC CRA）不会被当作流复制起点，出错自动回退。
+- 🐢 **低 CPU 占用**：`nice 10`、`-threads 2`、同一时间只剪一个视频，不拖慢 NAS。
+- 📝 **时间轴全对齐**：字幕、弹幕、章节与视频使用同一组实际删除区间；剪后用 ffprobe 实测时长修正章节、NFO `<runtime>` 和数据库时长。
+- 👤 **非 root 运行**：入口脚本只用 root 给容器内的 `/dev/dri` 设备授权（宿主机设备权限不变），然后以 `PUID:PGID` 运行，下载的文件直接属于对应用户和用户组。
+- 📺 **Emby / Jellyfin 适配**：统一单 P 文件名、下载整轮结束后定向通知扫库、路径映射。
+
+## 🧠 智能裁剪原理（BETA）
+
+流复制只能从关键帧开始切，所以 stable 模式会把切点提前到上一个关键帧。智能裁剪的做法是：只把「切点 → 下一个关键帧」这一小段重新编码，中间整段 GOP 照常流复制，最后拼接起来。
+
+```mermaid
+flowchart LR
+    A[源视频] --> B[按数据包 flags 探测关键帧]
+    B --> D[为每个保留区间规划片段<br/>open-GOP 关键帧不作为复制起点]
+    D --> H[头部：切点 → 下一关键帧<br/>重新编码]
+    D --> M[中间：关键帧对齐部分<br/>流复制]
+    D --> T[尾部：最后关键帧 → 切点<br/>重新编码]
+    H --> J[各片段输出 MPEG-TS<br/>-output_ts_offset 对齐时间戳]
+    M --> J
+    T --> J
+    J --> K[concat: 协议拼接<br/>封装回原容器]
+    K --> V[ffprobe 校验时长<br/>原子替换原文件]
+```
+
+编码器回退链：
+
+```mermaid
+flowchart LR
+    V[hevc_vaapi<br/>核显 VAAPI] -- 失败 --> Q[hevc_qsv<br/>核显 QSV] -- 失败 --> X[libx265<br/>CPU] -- 失败 --> S[stable<br/>关键帧流复制]
+```
+
+- VAAPI 使用 `format=nv12,hwupload` 上传帧；重编码片段帧数按源帧率封顶，并以 `fps_mode passthrough` 保持原时间戳。
+- 实测（作者 NAS，Intel N5095，HEVC 测试视频）：4 个视频中 3 个剪后时长误差在 **+0.011 s** 以内；VAAPI 比 libx265 快约 **30–50%**。
+
+## ⚖️ Stable 与 Beta 对比
+
+| | stable（默认） | beta_smart（BETA） |
+|---|---|---|
+| 切点精度 | 吸附到上一个关键帧，可能多留不到一个 GOP | 精确到帧 |
+| 重新编码 | 无 | 仅切点附近几秒 |
+| 画质 | 无损 | 绝大部分无损，重编码的几秒有轻微损失 |
+| 速度 / CPU | 最快，几乎不占 CPU | 有核显时很轻；纯 CPU（libx265）较慢 |
+| 依赖 | ffmpeg | ffmpeg；建议映射 `/dev/dri` |
+| 失败处理 | `fail_open` 保留原片 | 自动回退 stable |
+
+> `cut_mode = accurate` 是另一种老模式：整片用 libx264 重新编码，最精确但最耗 CPU，此时 `cut_strategy` 不生效。
+
+## 🖥️ 硬件与兼容性
+
+| 片源编码 | hevc_vaapi | hevc_qsv | libx265（CPU） | stable 回退 |
+|---|---|---|---|---|
+| H.265 / HEVC（主要测试） | ✅ 首选 | ✅ | ✅ | ✅ |
+| H.264 / AVC | ⚠️ 支持，见已知问题 | ⚠️ | ⚠️ | ✅ |
+| open-GOP 关键帧 | 跳过，改用下一个干净关键帧或重编码 | | | ✅ 出错时回退 |
+
+- 已验证平台：Intel **N5095**（Jasper Lake），QNAP，Alpine 3.22 + ffmpeg 6.1.2 + `intel-media-driver` / `intel-media-sdk` / `onevpl-libs`。
+- 其它较新的 Intel 核显理论可用但未测试；AMD / NVIDIA 硬件编码目前未接入，会回退到 libx265。
+- 只构建 linux/amd64（静态 musl 二进制）。
+
+## 🚀 快速开始
+
+### 1. 编译
+
+```sh
+cd web && npm ci && npm run build && cd ..
+cargo build --release --target x86_64-unknown-linux-musl -p bili_sync
+tar czf bili-sync-rs-Linux-x86_64-musl.tar.gz -C target/x86_64-unknown-linux-musl/release bili-sync-rs
+```
+
+### 2. 构建镜像
+
+把 tarball、`Dockerfile.qnap`（改名为 `Dockerfile`）和 `deploy/qnap-entrypoint.sh` 放在同一目录：
+
+```sh
+docker build -t bili-sync-sponsorblock:3.1.5.1 .
+```
+
+### 3. 运行（docker run）
+
+```sh
+docker run -d --name bili-sync-sponsorblock --restart unless-stopped \
+  --user 0:0 --cap-drop ALL \
+  --cap-add CHOWN --cap-add FOWNER --cap-add SETUID --cap-add SETGID \
+  --security-opt no-new-privileges \
+  --device /dev/dri/renderD128 \
+  -e PUID=1000 -e PGID=1000 -e TZ=Asia/Shanghai \
+  -p 12345:12345 \
+  -v /path/to/config:/app/.config/bili-sync \
+  -v /path/to/media/bili-sync:/bili-sync \
+  bili-sync-sponsorblock:3.1.5.1
+```
+
+### 4. 运行（docker compose）
+
+见 [`deploy/docker-compose.nas.yml`](deploy/docker-compose.nas.yml)：
+
+```yaml
+services:
+  bili-sync-sponsorblock:
+    image: bili-sync-sponsorblock:3.1.5.1
+    container_name: bili-sync-sponsorblock
+    restart: unless-stopped
+    user: "0:0"            # 仅入口脚本用 root，程序本身以 PUID:PGID 运行
+    cap_drop: [ALL]
+    cap_add: [CHOWN, FOWNER, SETUID, SETGID]
+    security_opt: [no-new-privileges]
+    devices:
+      - /dev/dri/renderD128:/dev/dri/renderD128   # 可选：核显智能裁剪
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Shanghai
+    ports:
+      - "12345:12345"
+    volumes:
+      - /path/to/config:/app/.config/bili-sync
+      - /path/to/media/bili-sync:/bili-sync
+```
+
+- 媒体目录统一挂载到 `/bili-sync`，Web 界面里的路径都写 `/bili-sync/...`。
+- 不映射 `/dev/dri` 也能运行，智能裁剪会用 libx265 或回退 stable。
+
+### 威联通（QNAP）说明
+
+- 宿主机 `/dev/dri/renderD128` 默认是 `600 admin:administrators`，**不需要改**。`--device` 会在容器里创建一份独立的设备节点，入口脚本只修改这份（`chgrp PGID` + `chmod 660`）。
+- `PUID` / `PGID` 填 NAS 上媒体用户的 UID / GID（可在 SSH 里 `id 用户名` 查看），该用户需要对媒体目录和配置目录有读写权限。
+- UID 重启和重装容器都不会变；只有删除重建用户后才需要改 `PUID` / `PGID` 并修正目录所有者。
+
+## ⚙️ 配置参考
+
+`sponsor_block` 配置段（Web 设置页均可修改）：
+
+| 字段 | 默认值 | 说明 |
+|---|---|---|
+| `enabled` | `false` | 全局总开关 |
+| `server_address` | `https://www.bsbsb.top` | 主 API 服务器 |
+| `mirror_server_addresses` | `["https://www.bsbsb.xyz"]` | 镜像服务器 |
+| `categories` | `["sponsor","padding"]` | 要剪掉的类别 |
+| `mark_categories` | `[]` | 不剪、只写成章节标记的类别 |
+| `cut_mode` | `keyframe` | `keyframe`（流复制）或 `accurate`（整片 libx264 重编码） |
+| `cut_strategy` | `stable` | keyframe 模式下的策略：`stable` 或 `beta_smart`（界面「关键帧裁剪策略」，带 BETA 标记） |
+| `min_segment_seconds` | — | 短于此值的片段忽略 |
+| `min_keep_gap_seconds` | — | 短于此值的保留间隙并入删除区间 |
+| `fail_open` | `true` | 出错时保留原片，只记日志 |
+| `heartbeat_interval_secs` | `300` | 服务器心跳检测间隔，0 为关闭 |
+
+**按视频源开关**：在每个视频源（收藏夹 / 合集 / 投稿 / 稍后再看）的设置里打开或关闭「SponsorBlock」，对应数据库字段 `sponsorblock_enabled`；全局 `enabled` 关闭时所有视频源都不剪。
+
+环境变量：
+
+| 变量 | 说明 |
+|---|---|
+| `PUID` / `PGID` | 程序运行的用户和组（容器以 root 启动时生效） |
+| `BILI_SYNC_SMARTCUT_KEEP_TMP` | 设置后保留智能裁剪的临时片段，便于排查 |
+
+```json
+"sponsor_block": {
+  "enabled": true,
+  "categories": ["sponsor", "padding"],
+  "mark_categories": [],
+  "cut_mode": "keyframe",
+  "cut_strategy": "beta_smart",
+  "fail_open": true
+}
+```
+
+## 🔁 SponsorBlock 处理流程
 
 视频下载合并完成后，如果开启了 `sponsor_block.enabled`，会按下面的流程处理：
 
@@ -39,15 +219,8 @@
 6. **章节标记（可选）**：`mark_categories` 里的类别不剪辑，而是写成 MP4/MKV 章节（使用中文标题），同时在字幕和弹幕中插入 `〔SB〕` 提示，方便在 Emby/Jellyfin 里手动跳到下一章节。同一类别如果同时出现在剪辑和标记里，以剪辑为准。
 7. **容错**：默认 `fail_open`，API 或 ffmpeg 出错时保留原下载文件，只记日志。视频源开启了「按章节拆分」时会跳过 SponsorBlock 处理。
 
-**为什么剪完后可能还残留约 1 秒？** keyframe 模式不重新编码，流复制只能从关键帧开始切。B 站视频的关键帧间隔（GOP）一般在 1～数秒，剪辑起点会被提前到上一个关键帧，所以广告结束处可能多留不到一个 GOP 的画面。如果介意，可以改用 `accurate` 模式。字幕和弹幕按吸附后的实际切点对齐，不会因此错位。
 
-**界面与接口：**
-
-- Web 设置页可以开关 SponsorBlock、选择类别和模式，并检测服务器状态（心跳接口 `GET /api/sponsorblock/health`，默认每 300 秒检测一次）。
-- 分 P 状态新增第 6 位「视频剪切」，详情页会显示剪辑结果（`cut` / `none` / `marked` / `failed_open` 等）。数据库迁移会让已有媒体库只补跑这一步。
-- 目前只处理 B 站视频，YouTube / 抖音等外部来源不受影响。
-
-## 二、Emby / Jellyfin 适配
+### Emby / Jellyfin 适配
 
 - **单 P 视频统一文件名**：视频、`-thumb`、`-fanart`、NFO、字幕、弹幕都用文件夹名作为文件名（和 3Blue1Brown 这类目录的结构一致），这样 Emby 能正确显示封面。同时修复了文件夹图片文件名为空的问题。
 - **下载完成后通知扫库**（参考 MoviePilot / Sonarr 的实现）：
@@ -56,52 +229,65 @@
   - 支持路径映射，按最长前缀把容器内路径（如 `/bili-sync/...`）转换成媒体服务器看到的路径。套件版 Emby 填 NAS 上的真实路径即可。
   - API Key 只放在 `X-Emby-Token` 请求头里，不写入日志，接口也只返回「是否已设置」。
 
-## 三、其他改动
 
-- **并发**：视频处理并发数默认 1，限制在 1～2 之间，避免 NAS 上 ffmpeg 抢占资源。
-- **开箱即用的单一挂载**：媒体目录只需要挂载到容器内的 `/bili-sync`。
-- **仓库精简**：删除了上游的 Docker、compose、CI、文档站和截图资源，只保留完整源码，需要自己编译。不发布 Release。
+## ❓ 常见问题
 
-## 编译
+<details>
+<summary><b>CPU 占用很高，核显好像没用上？</b></summary>
 
-```sh
-cd web && npm ci && npm run build && cd ..
-cargo build --release --target x86_64-unknown-linux-musl -p bili_sync
-tar czf bili-sync-rs-Linux-x86_64-musl.tar.gz -C target/x86_64-unknown-linux-musl/release bili-sync-rs
-```
+1. 确认容器映射了 `--device /dev/dri/renderD128`。
+2. 进容器执行 `vainfo`，应看到 iHD 驱动和 `VAProfileHEVCMain`。
+3. 用程序的身份测试：`docker exec -u PUID:PGID 容器名 ffmpeg -f lavfi -i testsrc=d=1 -vaapi_device /dev/dri/renderD128 -vf format=nv12,hwupload -frames:v 1 -c:v hevc_vaapi -f null -`。
+4. 日志里会写出智能裁剪实际使用的编码器；探测失败也会记录原因。注意即使用了核显，拼接、探测等步骤仍会占少量 CPU。
+</details>
 
-## 部署（Docker / 威联通）
+<details>
+<summary><b>下载的文件属于 root / admin？</b></summary>
 
-1. 把上面打包好的 tarball 放到 `Dockerfile.qnap` 同一目录，把 `Dockerfile.qnap` 重命名为 `Dockerfile` 后构建镜像。镜像基于 Alpine 3.22，自带 ffmpeg。
-2. 参考 `deploy/docker-compose.nas.yml` 运行容器：
-   - 媒体目录 → `/bili-sync`（Web 界面里的路径都写 `/bili-sync/...`）
-   - 配置目录 → `/app/.config/bili-sync`
-   - 端口 `12345`，建议用媒体用户运行（`user: uid:gid`）
-3. `deploy/` 里的辅助脚本默认只做演练（dry-run），加参数才会真正执行：
-   - `cleanup-sb-orig.sh <目录> [--delete]`：清理旧版本留下的未剪辑原片
-   - `migrate-episode-names.sh <宿主目录> <宿主根> <容器根> [--apply]`：把旧的 `S01E27 - 标题.*` 单 P 文件改为统一文件名，并生成更新数据库路径的 SQL
+用 `--user 0:0` 加 `PUID` / `PGID` 启动（见快速开始），入口脚本会切换到该用户并设置 `umask 002`。旧版本留下的 root 文件需要手动 `chown` 一次。
+</details>
 
-## 配置示例
+<details>
+<summary><b>剪完后时长和预期差一点 / 还残留约 1 秒广告？</b></summary>
 
-```json
-"sponsor_block": {
-  "enabled": true,
-  "server_address": "https://www.bsbsb.top",
-  "mirror_server_addresses": ["https://www.bsbsb.xyz"],
-  "categories": ["sponsor", "padding"],
-  "mark_categories": [],
-  "cut_mode": "keyframe",
-  "fail_open": true
-}
-```
+stable 模式切点吸附到关键帧，B 站 GOP 一般 1 到数秒，可能多留不到一个 GOP，字幕弹幕按实际切点对齐不会错位。想要精确可开 `beta_smart`。少数奇数帧率的 HEVC 片源在 beta 模式下也可能有小幅时长漂移（见已知问题）。
+</details>
 
-更详细的实现说明见 `NOTES.md`，变更历史见 `docs/changelog.md`。
+<details>
+<summary><b>open-GOP 片源会怎样？</b></summary>
 
-## 致谢
+如果关键帧不是 IDR（H.264 非 IDR 关键帧 / HEVC CRA），从它开始流复制、接在重编码片段之后，解码器可能乱序输出帧。所以智能裁剪不会把这类关键帧当作流复制起点，而是用下一个干净的关键帧，必要时整段重编码；如果仍然失败，就回退 stable。这是预期行为。
+</details>
+
+<details>
+<summary><b>Emby 扫不到新视频？</b></summary>
+
+检查路径映射：把容器内的 `/bili-sync/...` 映射成媒体服务器看到的路径；通知在一整轮下载结束后再等 `delay_seconds`（默认 300 秒）才发送。
+</details>
+
+## 🔀 与上游的区别
+
+- 新增 SponsorBlock 剪辑（stable / beta_smart / accurate）、按视频源开关、章节标记、字幕弹幕时间轴对齐。
+- 新增 Emby / Jellyfin 适配：统一单 P 文件名、整轮结束后定向通知扫库、路径映射。
+- 镜像加入 Intel VAAPI / QSV 运行库和非 root 入口脚本。
+- 视频处理并发默认 1（限制 1～2），避免 NAS 上 ffmpeg 抢资源。
+- 仓库精简：去掉上游的 CI、文档站和截图，只保留源码；不发布 Release / 镜像。
+- `deploy/` 下的辅助脚本默认只做演练：`cleanup-sb-orig.sh`（清理旧版未剪原片）、`migrate-episode-names.sh`（旧单 P 文件名迁移）。
+
+## 🗺️ 路线图与已知问题
+
+- ⚠️ **HEVC 奇数帧率漂移**：测试的 4 个 HEVC 视频里有 1 个（非整数帧率）剪后时长漂移超过 +0.011 s，仍在排查。
+- ⚠️ **H.264 拼接问题**：H.264 片源的重编码片段与流复制部分拼接时仍有问题，H.264 建议暂时使用 stable。
+- 🔜 视 beta 稳定性考虑将 `beta_smart` 转为默认。
+- 🔜 AMD / NVIDIA 硬件编码暂未计划。
+
+更详细的实现说明见 [`NOTES.md`](NOTES.md)，变更历史见 [`docs/changelog.md`](docs/changelog.md)。
+
+## 🙏 致谢与许可
 
 - [amtoaer/bili-sync](https://github.com/amtoaer/bili-sync)：原始项目
 - [NeeYoonc/bili-sync-up](https://github.com/NeeYoonc/bili-sync-up)：本 fork 的直接上游
-- [hanydd/BilibiliSponsorBlock](https://github.com/hanydd/BilibiliSponsorBlock)：片段数据与 API
+- [hanydd/BilibiliSponsorBlock](https://github.com/hanydd/BilibiliSponsorBlock)：片段数据、API，以及浏览器插件中精确剪切思路的参考
 - [MoviePilot](https://github.com/jxxghp/MoviePilot)、[Sonarr](https://github.com/Sonarr/Sonarr)：媒体服务器通知的参考实现
 
-许可证见 `License`（MIT）。
+以 [MIT](./License) 许可证发布。

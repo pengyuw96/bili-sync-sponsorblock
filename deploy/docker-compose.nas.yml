@@ -7,13 +7,20 @@ services:
     image: bili-sync-sponsorblock:3.1.5.1
     container_name: bili-sync-sponsorblock
     restart: unless-stopped
-    user: "<UID>:<GID>"
+    user: "0:0"   # root only for the entrypoint; the app runs as PUID:PGID
+    cap_drop: [ALL]
+    cap_add: [CHOWN, FOWNER, SETUID, SETGID]
+    security_opt: [no-new-privileges]
+    devices:
+      - /dev/dri/renderD128:/dev/dri/renderD128   # optional: iGPU smart cut
     ports:
       - "12346:12345"
     volumes:
       - /path/to/bili-sync/config:/app/.config/bili-sync
       - /path/to/media/bili-sync:/bili-sync
     environment:
+      - PUID=<UID>
+      - PGID=<GID>
       - TZ=Asia/Shanghai
       - RUST_LOG=None,bili_sync=info
     logging:

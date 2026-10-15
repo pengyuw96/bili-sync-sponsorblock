@@ -588,7 +588,7 @@ pub struct SponsorBlockConfig {
     pub cut_mode: String,
     /// 关键帧模式下的裁剪策略："stable"（默认，切点吸附关键帧，纯流复制）
     /// 或 "beta_smart"（Beta 智能裁剪：只重编码切点到相邻关键帧的一小段，其余流复制，切点精确到帧；
-    /// 仅 H.264，失败自动回退 stable）。cut_mode = accurate 时本项不生效。
+    /// 支持 H.264 / H.265，优先核显硬件编码，失败自动回退 stable）。cut_mode = accurate 时本项不生效。
     #[serde(default = "default_sponsor_block_cut_strategy")]
     pub cut_strategy: String,
     /// 最短可裁剪片段（秒）
