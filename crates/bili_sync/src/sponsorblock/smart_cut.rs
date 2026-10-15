@@ -332,11 +332,21 @@ async fn probe_encoder(plan: &EncodePlan, size: (i64, i64)) -> bool {
         c.arg(a);
     }
     c.args(["-f", "mpegts"]).arg(&out);
-    let ok = c
-        .output()
-        .await
-        .map(|o| o.status.success() && out.exists() && out.metadata().map(|m| m.len() > 0).unwrap_or(false))
-        .unwrap_or(false);
+    let ok = match c.output().await {
+        Ok(o) => {
+            let ok = o.status.success() && out.exists() && out.metadata().map(|m| m.len() > 0).unwrap_or(false);
+            if !ok {
+                let err = String::from_utf8_lossy(&o.stderr);
+                let tail: Vec<&str> = err.lines().rev().take(3).collect();
+                info!("SponsorBlock smart cut: {} probe encode failed: {}", plan.name, tail.into_iter().rev().collect::<Vec<_>>().join(" | "));
+            }
+            ok
+        }
+        Err(e) => {
+            info!("SponsorBlock smart cut: {} probe spawn failed: {}", plan.name, e);
+            false
+        }
+    };
     let _ = std::fs::remove_dir_all(&dir);
     ok
 }
@@ -413,7 +423,8 @@ fn hevc_software_plan(v: &VideoParams) -> Result<EncodePlan> {
 fn hevc_qsv_plan(v: &VideoParams) -> EncodePlan {
     // QSV: no software -threads; look_ahead off for short GOP slivers.
     let mut args: Vec<String> = [
-        "-c:v", "hevc_qsv", "-preset", "veryfast", "-global_quality", "23", "-look_ahead", "0",
+        // No `-look_ahead` (h264_qsv-only option; unknown to hevc_qsv in ffmpeg 6.1).
+        "-c:v", "hevc_qsv", "-preset", "veryfast", "-global_quality", "23",
         "-profile:v", "main",
     ]
     .map(String::from)
@@ -442,8 +453,8 @@ fn hevc_vaapi_plan(v: &VideoParams, render: &Path) -> EncodePlan {
             "hevc_vaapi".into(),
             "-qp".into(),
             "23".into(),
-            "-s".into(),
-            format!("{}x{}", v.width, v.height),
+            // No `-s`: a size change after hwupload would need a software scaler
+            // on VAAPI surfaces and fails; pieces keep the source size anyway.
         ]
         .into(),
     }
