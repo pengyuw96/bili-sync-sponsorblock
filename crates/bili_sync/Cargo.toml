@@ -10,6 +10,7 @@ readme = "../../README.md"
 build = "build.rs"
 
 [dependencies]
+libc = "0.2"
 anyhow = { workspace = true }
 arc-swap = { workspace = true }
 async-stream = { workspace = true }

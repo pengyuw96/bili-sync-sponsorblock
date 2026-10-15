@@ -2800,6 +2800,9 @@ pub async fn process_scheduled_sources(
                 }
             }
         }
+        if !source.path.is_empty() {
+            crate::utils::ownership::fix_trees("external", vec![std::path::PathBuf::from(&source.path)]).await;
+        }
         // 外源新增视频并入「扫描完成」推送：与 B 站源共用同一份扫描摘要。
         if let Ok(added) = scan_result.as_ref() {
             results.push(collect_external_scan_result(db, source, &scan_started_at, *added).await);

@@ -1245,6 +1245,20 @@ pub async fn process_video_source(
     downloader: &UnifiedDownloader,
     token: CancellationToken,
 ) -> Result<(usize, Vec<NewVideoInfo>)> {
+    let res = process_video_source_inner(args, bili_client, path, connection, downloader, token).await;
+    // 以 root 运行时，把本源目录下新建/移动的文件归属修正为 PUID:PGID（仅改不符的条目）
+    crate::utils::ownership::fix_trees("source", vec![path.to_path_buf()]).await;
+    res
+}
+
+async fn process_video_source_inner(
+    args: &Args,
+    bili_client: &BiliClient,
+    path: &Path,
+    connection: &DatabaseConnection,
+    downloader: &UnifiedDownloader,
+    token: CancellationToken,
+) -> Result<(usize, Vec<NewVideoInfo>)> {
     // 记录当前处理的参数和路径
     if let Args::Bangumi {
         season_id,

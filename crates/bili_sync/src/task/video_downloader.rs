@@ -1494,6 +1494,8 @@ pub async fn video_downloader(connection: Arc<DatabaseConnection>) {
             let scanned_source_total = processed_sources + external_totals.sources;
             let sources_with_new_content_total = sources_with_new_content + external_totals.sources_with_new_content;
 
+            crate::utils::ownership::fix_config_and_upper().await;
+
             info!(
                 "本轮扫描完成 - 视频源数量: {}（{}），新增作品: {}",
                 ordered_sources.len() + external_totals.sources,

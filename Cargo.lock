@@ -483,6 +483,7 @@ dependencies = [
  "html-escape",
  "lazy_static",
  "leaky-bucket",
+ "libc",
  "md5",
  "memchr",
  "mime_guess",

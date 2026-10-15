@@ -16,6 +16,7 @@ pub mod netscape_cookies;
 pub mod nfo;
 pub mod process;
 pub mod notification;
+pub mod ownership;
 pub mod scan_collector;
 pub mod scan_id_tracker;
 pub mod signal;

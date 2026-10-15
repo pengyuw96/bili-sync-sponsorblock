@@ -56,6 +56,7 @@ use anyhow::Result;
 const TOKIO_WORKER_STACK_SIZE: usize = 8 * 1024 * 1024;
 
 fn main() -> Result<()> {
+    crate::utils::ownership::init_process_umask();
     #[cfg(windows)]
     {
         let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -82,6 +83,9 @@ async fn async_main() -> Result<()> {
     if let Err(e) = init_config_with_database(connection.as_ref().clone()).await {
         warn!("数据库配置系统初始化失败: {}, 继续使用TOML配置", e);
     }
+
+    // 以 root 运行且设置了 PUID/PGID 时，启动时修正配置目录（日志/数据库）归属
+    crate::utils::ownership::fix_config_and_upper().await;
 
     // 迁移旧版外部平台凭证文件到数据库（YouTube/抖音/TikTok）
     crate::credential_store::migrate_legacy_credentials_on_startup().await;
