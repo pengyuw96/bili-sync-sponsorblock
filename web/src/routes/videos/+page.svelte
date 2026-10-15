@@ -7,7 +7,6 @@
 	import SearchBar from '$lib/components/search-bar.svelte';
 	import SectionHeader from '$lib/components/section-header.svelte';
 	import Loading from '$lib/components/ui/Loading.svelte';
-	import SelectAllButton from '$lib/components/select-all-button.svelte';
 	import EmptyState from '$lib/components/empty-state.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { CustomSelect } from '$lib/components/ui/select';
@@ -1231,8 +1230,17 @@
 					已选择 {selectedVideos.size} 个视频--将进行批量删除！！！
 				</div>
 				<div class="flex gap-2">
-					{#if videosData?.videos && selectedVideos.size < videosData.videos.length}
-						<SelectAllButton onclick={selectAllVideos} className="text-sm" />
+					{#if videosData?.videos && videosData.videos.length > 0}
+						<label class="flex cursor-pointer items-center gap-1 text-sm select-none">
+							<input
+								type="checkbox"
+								class="h-4 w-4"
+								checked={videosData.videos.every((v) => selectedVideos.has(v.id))}
+								onchange={(e) =>
+									(e.currentTarget as HTMLInputElement).checked ? selectAllVideos() : clearSelection()}
+							/>
+							全选本页
+						</label>
 					{/if}
 					{#if selectedVideos.size > 0}
 						<Button variant="outline" size="sm" onclick={clearSelection}>取消选中</Button>

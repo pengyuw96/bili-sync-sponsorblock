@@ -6943,6 +6943,30 @@ pub async fn delete_video_internal(db: Arc<DatabaseConnection>, video_id: i32) -
         .exec(db.as_ref())
         .await?;
 
+    // 整体删除视频自己的文件夹（残留的 nfo/图片/字幕/弹幕/sb 文件等），再向上清理空目录
+    {
+        let normalized_video_path = normalize_file_path(&video.path);
+        let vdir = std::path::Path::new(&normalized_video_path);
+        let roots: Vec<std::path::PathBuf> = source_base_paths
+            .iter()
+            .map(|p| std::path::PathBuf::from(normalize_file_path(p)))
+            .collect();
+        let others = video::Entity::find()
+            .filter(video::Column::Id.ne(video_id))
+            .filter(video::Column::Deleted.eq(0))
+            .filter(
+                Condition::any()
+                    .add(video::Column::Path.eq(video.path.clone()))
+                    .add(video::Column::Path.starts_with(format!("{}/", video.path.trim_end_matches('/')))),
+            )
+            .count(db.as_ref())
+            .await
+            .unwrap_or(1);
+        if let Err(e) = remove_video_folder_safely(vdir, &roots, others > 0) {
+            warn!("删除视频文件夹失败: {} - {}", normalized_video_path, e);
+        }
+    }
+
     for base_path in &source_base_paths {
         cleanup_empty_parent_dirs(&video.path, base_path);
         cleanup_empty_dir_if_empty(base_path, "视频源基础目录");
@@ -6972,6 +6996,38 @@ fn dir_has_media_files(dir: &std::path::Path) -> bool {
         .into_iter()
         .flat_map(|entries| entries.filter_map(Result::ok))
         .any(|entry| entry.path().is_file() && is_media_file(&entry.path()))
+}
+
+/// 删除视频自身的文件夹（含 nfo、图片、字幕、弹幕、SponsorBlock 计划等残留）。
+/// 安全规则：
+/// - 文件夹必须位于某个视频源根目录之内（规范化后比较），且不能等于根目录；
+/// - 文件夹内（递归）不能还有其它媒体文件，`shared_with_others` 为 true（数据库里还有别的
+///   未删除视频指向此目录或其子目录）时也拒绝。
+/// 返回 Ok(true) 表示已整体删除。
+fn remove_video_folder_safely(
+    video_dir: &std::path::Path,
+    source_roots: &[std::path::PathBuf],
+    shared_with_others: bool,
+) -> std::io::Result<bool> {
+    if shared_with_others || !video_dir.is_dir() {
+        return Ok(false);
+    }
+    let dir = std::fs::canonicalize(video_dir)?;
+    let inside = source_roots.iter().any(|r| match std::fs::canonicalize(r) {
+        Ok(root) => dir != root && dir.starts_with(&root),
+        Err(_) => false,
+    });
+    if !inside {
+        warn!("拒绝删除视频文件夹：不在视频源根目录内或等于根目录: {:?}", dir);
+        return Ok(false);
+    }
+    if dir_has_media_files_recursive(&dir) {
+        info!("视频文件夹仍有其它媒体文件，保留: {:?}", dir);
+        return Ok(false);
+    }
+    std::fs::remove_dir_all(&dir)?;
+    info!("已删除视频文件夹: {:?}", dir);
+    Ok(true)
 }
 
 fn dir_has_media_files_recursive(dir: &std::path::Path) -> bool {
@@ -19713,25 +19769,9 @@ fn generate_unique_folder_name(
         return unique_name;
     }
 
-    // 真实冲突时固定使用完整发布时间+BVID，同一个视频永远落到同一个目录。
-    unique_name = if bvid.trim().is_empty() {
-        format!("{}-{}", base_name, pubtime)
-    } else {
-        format!("{}-{}-{}", base_name, pubtime, bvid)
-    };
-    let identity_path = parent_dir.join(&unique_name);
-    if !identity_path.exists() {
-        info!(
-            "检测到文件夹名冲突，追加完整发布时间+BVID: {} -> {}",
-            base_name, unique_name
-        );
-        return unique_name;
-    }
-
-    info!(
-        "检测到文件夹名冲突，固定使用完整发布时间+BVID后缀: {} -> {}",
-        base_name, unique_name
-    );
+    // 策略：目标文件夹已存在时直接复用（覆盖），不追加「-发布时间-BVID」后缀。
+    let _ = (bvid, pubtime);
+    info!("文件夹已存在，直接复用: {:?}", base_path);
     unique_name
 }
 
@@ -23311,4 +23351,42 @@ pub async fn test_media_server() -> Result<ApiResponse<serde_json::Value>, ApiEr
         Err(e) => serde_json::json!({"ok": false, "message": format!("{:#}", e)}),
     };
     Ok(ApiResponse::ok(body))
+}
+
+#[cfg(test)]
+mod remove_video_folder_tests {
+    use super::remove_video_folder_safely;
+    use std::fs;
+    fn tmp(n: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("rvf-{}-{}", n, uuid::Uuid::new_v4()));
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+    #[test]
+    fn removes_own_folder_keeps_sibling_and_root() {
+        let root = tmp("root");
+        let up = root.join("UP");
+        let a = up.join("视频A");
+        let b = up.join("视频B");
+        fs::create_dir_all(a.join("Season 1")).unwrap();
+        fs::create_dir_all(&b).unwrap();
+        fs::write(a.join("视频A.nfo"), "x").unwrap();
+        fs::write(a.join(".视频A.sponsorblock.json"), "x").unwrap();
+        fs::write(a.join("Season 1").join("x.zh-CN.default.ass"), "x").unwrap();
+        fs::write(b.join("视频B.mp4"), "x").unwrap();
+        assert!(remove_video_folder_safely(&a, &[root.clone()], false).unwrap());
+        assert!(!a.exists());
+        assert!(b.join("视频B.mp4").exists());
+        // root itself and folders outside the root are refused
+        assert!(!remove_video_folder_safely(&root, &[root.clone()], false).unwrap());
+        let outside = tmp("outside");
+        assert!(!remove_video_folder_safely(&outside, &[root.clone()], false).unwrap());
+        assert!(outside.exists());
+        // folder still holding other media, or shared in DB, is kept
+        assert!(!remove_video_folder_safely(&up, &[root.clone()], false).unwrap());
+        assert!(!remove_video_folder_safely(&b, &[root.clone()], true).unwrap());
+        assert!(b.exists());
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&outside);
+    }
 }

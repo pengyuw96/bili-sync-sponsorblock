@@ -6,6 +6,8 @@ set -e
 PUID="${PUID:-2601}"
 PGID="${PGID:-1113}"
 APP="${BILI_SYNC_APP:-/app/bili-sync-rs}"
+export HOME="${HOME:-/app}"
+export BILI_SYNC_CONFIG_DIR="${BILI_SYNC_CONFIG_DIR:-$HOME/.config/bili-sync}"
 if [ "$(id -u)" = "0" ]; then
   for n in /dev/dri/renderD*; do
     [ -e "$n" ] || continue

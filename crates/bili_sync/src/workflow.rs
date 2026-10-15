@@ -15793,25 +15793,10 @@ pub fn generate_unique_folder_name(
         return unique_name;
     }
 
-    // 确认是真正的冲突，开始生成唯一名称
-    debug!("检测到真实的文件夹名冲突，开始生成唯一名称: {}", base_name);
-
-    // 真实冲突时固定使用完整发布时间+BVID，同一个视频永远落到同一个目录。
-    unique_name = format!("{}-{}", base_name, video_identity_suffix(video_model, pubtime));
-    let identity_path = parent_dir.join(&unique_name);
-    if is_same_video_folder(&identity_path, video_model) {
-        debug!("文件夹 {:?} 已是当前视频的文件夹，无需生成新名称", identity_path);
-        return unique_name;
-    }
-    if !identity_path.exists() {
-        info!("检测到下载文件夹名冲突，追加唯一标识: {} -> {}", base_name, unique_name);
-        return unique_name;
-    }
-
-    info!(
-        "检测到下载文件夹名冲突，固定使用完整发布时间+BVID后缀: {} -> {}",
-        base_name, unique_name
-    );
+    // 策略：目标文件夹已存在时直接复用并覆盖文件，不再追加「-发布时间-BVID」后缀
+    // （避免同一视频在中断重下后被拆成两个文件夹）。
+    let _ = pubtime;
+    info!("下载文件夹已存在，直接复用并覆盖: {:?}", base_path);
     unique_name
 }
 
@@ -17329,96 +17314,6 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_unique_folder_name_locks_severe_conflict_to_timestamp_bvid_suffix() {
-        let parent_dir = unique_temp_dir("dedup-timestamp-bvid-locked");
-        let upper_dir = parent_dir.join("测试UP");
-        fs::create_dir_all(upper_dir.join("喵")).expect("应能创建基础冲突目录");
-        fs::create_dir_all(upper_dir.join("喵-20260428170830-BV1TestReuse001")).expect("应能创建唯一标识冲突目录");
-        fs::create_dir_all(upper_dir.join("喵-1")).expect("应能创建数字冲突目录");
-
-        let video = video::Model {
-            name: "喵".to_string(),
-            upper_name: "测试UP".to_string(),
-            bvid: "BV1TestReuse001".to_string(),
-            cid: Some(123456),
-            path: "/stale/path/喵-2".to_string(),
-            ..Default::default()
-        };
-
-        let unique_name = generate_unique_folder_name(&parent_dir, "测试UP/喵", &video, "20260428170830");
-
-        assert_eq!(unique_name, "测试UP/喵-20260428170830-BV1TestReuse001");
-        fs::remove_dir_all(parent_dir).expect("应能清理临时目录");
-    }
-
-    #[test]
-    fn test_generate_unique_folder_name_uses_timestamp_bvid_suffix_before_numbered_suffix() {
-        let parent_dir = unique_temp_dir("dedup-timestamp-bvid-before-number");
-        let upper_dir = parent_dir.join("测试UP");
-        fs::create_dir_all(upper_dir.join("喵")).expect("应能创建基础冲突目录");
-        fs::create_dir_all(upper_dir.join("喵-1")).expect("应能创建数字冲突目录");
-
-        let video = video::Model {
-            name: "喵".to_string(),
-            upper_name: "测试UP".to_string(),
-            bvid: "BV1TestReuse002".to_string(),
-            cid: Some(234567),
-            path: "/stale/path/喵-2".to_string(),
-            ..Default::default()
-        };
-
-        let unique_name = generate_unique_folder_name(&parent_dir, "测试UP/喵", &video, "20260428170830");
-
-        assert_eq!(unique_name, "测试UP/喵-20260428170830-BV1TestReuse002");
-        fs::remove_dir_all(parent_dir).expect("应能清理临时目录");
-    }
-
-    #[test]
-    fn test_generate_unique_folder_name_uses_bvid_when_cid_missing() {
-        let parent_dir = unique_temp_dir("dedup-bvid-fallback");
-        let upper_dir = parent_dir.join("测试UP");
-        fs::create_dir_all(upper_dir.join("喵")).expect("应能创建基础冲突目录");
-        fs::create_dir_all(upper_dir.join("喵-1")).expect("应能创建数字冲突目录");
-
-        let video = video::Model {
-            name: "喵".to_string(),
-            upper_name: "测试UP".to_string(),
-            bvid: "BV1TestFallback".to_string(),
-            cid: None,
-            path: "/stale/path/喵-2".to_string(),
-            ..Default::default()
-        };
-
-        let unique_name = generate_unique_folder_name(&parent_dir, "测试UP/喵", &video, "20260428170830");
-
-        assert_eq!(unique_name, "测试UP/喵-20260428170830-BV1TestFallback");
-        fs::remove_dir_all(parent_dir).expect("应能清理临时目录");
-    }
-
-    #[test]
-    fn test_generate_unique_folder_name_does_not_trust_same_db_path_when_folder_has_other_bvid() {
-        let parent_dir = unique_temp_dir("dedup-other-bvid");
-        let upper_dir = parent_dir.join("测试UP");
-        let title_dir = upper_dir.join("喵");
-        fs::create_dir_all(&title_dir).expect("应能创建基础冲突目录");
-        fs::write(title_dir.join("20260401010101-BV1OldVideo1-喵.mp4"), b"old").expect("应能创建旧视频文件");
-
-        let video = video::Model {
-            name: "喵".to_string(),
-            upper_name: "测试UP".to_string(),
-            bvid: "BV1NewVideo1".to_string(),
-            cid: Some(345678),
-            path: title_dir.to_string_lossy().to_string(),
-            ..Default::default()
-        };
-
-        let unique_name = generate_unique_folder_name(&parent_dir, "测试UP/喵", &video, "20260428170830");
-
-        assert_eq!(unique_name, "测试UP/喵-20260428170830-BV1NewVideo1");
-        fs::remove_dir_all(parent_dir).expect("应能清理临时目录");
-    }
-
-    #[test]
     fn test_generate_unique_folder_name_reuses_partial_download_dir_from_identity_db_path() {
         let parent_dir = unique_temp_dir("dedup-partial-download-dir");
         let upper_dir = parent_dir.join("测试UP");
@@ -17448,6 +17343,15 @@ mod tests {
 
         assert_eq!(unique_name, "测试UP/喵");
         fs::remove_dir_all(parent_dir).expect("应能清理临时目录");
+    }
+
+    #[test]
+    fn test_generate_unique_folder_name_reuses_existing_conflicting_folder() {
+        let parent_dir = unique_temp_dir("dedup-reuse-existing");
+        fs::create_dir_all(parent_dir.join("同名")).unwrap();
+        let video = video::Model { bvid: "BV1other".to_string(), ..Default::default() };
+        assert_eq!(generate_unique_folder_name(&parent_dir, "同名", &video, "20260428170830"), "同名");
+        let _ = fs::remove_dir_all(&parent_dir);
     }
 
     #[test]
