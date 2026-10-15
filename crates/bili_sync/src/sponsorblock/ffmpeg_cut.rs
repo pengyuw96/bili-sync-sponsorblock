@@ -247,10 +247,13 @@ fn escape_concat_path(path: &Path) -> String {
 }
 
 
-/// Probe video keyframe timestamps (seconds) via ffprobe.
+/// Probe video keyframe timestamps (seconds) via ffprobe packet flags.
 ///
-/// Uses `-skip_frame nokey` so only keyframes are decoded/listed. Empty Vec on
-/// soft failure is fine — callers treat that as "do not snap".
+/// Reads packet `flags` (K = keyframe) instead of decoding with `-skip_frame nokey`.
+/// The old frame/CSV approach broke on ffmpeg 6.1 + Bilibili HEVC mp4: frames with
+/// side data print extra CSV columns (`0.000000,`) so the float parse dropped them.
+/// Uses `compact` key=value output so extra fields/side data never shift columns.
+/// Falls back to `dts_time` when `pts_time` is N/A. Empty Vec = "do not snap".
 pub async fn probe_video_keyframe_times(path: &Path) -> Result<Vec<f64>> {
     if !path.exists() {
         bail!("media missing for keyframe probe: {}", path.display());
@@ -262,12 +265,10 @@ pub async fn probe_video_keyframe_times(path: &Path) -> Result<Vec<f64>> {
             "error",
             "-select_streams",
             "v:0",
-            "-skip_frame",
-            "nokey",
             "-show_entries",
-            "frame=pts_time",
+            "packet=pts_time,dts_time,flags",
             "-of",
-            "csv=p=0",
+            "compact=p=1:nk=0",
             &path_str,
         ])
         .output()
@@ -278,44 +279,70 @@ pub async fn probe_video_keyframe_times(path: &Path) -> Result<Vec<f64>> {
         let stderr = String::from_utf8_lossy(&output.stderr);
         bail!("ffprobe keyframe probe error: {}", stderr.trim());
     }
-
-    let times: Vec<f64> = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(|line| {
-            let t = line.trim().parse::<f64>().ok()?;
-            (t.is_finite() && t >= 0.0).then_some(t)
-        })
-        .collect();
-    // ffmpeg input `-ss` is relative to the container start_time, while frame
-    // pts_time is absolute. Bilibili DASH merges often start at 0.02–1.5 s, so
-    // without this shift every snapped seek was off by start_time.
-    let start_time = probe_format_start_time(path).await.unwrap_or(0.0);
-    let mut times: Vec<f64> = times
-        .into_iter()
-        .map(|t| t - start_time)
-        .filter(|t| *t > -1e-3)
-        .map(|t| t.max(0.0))
-        .collect();
-    times.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    times.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
-    debug!(
-        "ffprobe keyframes: {} entries for {}",
-        times.len(),
-        path.display()
-    );
+    let times = parse_keyframe_packets(&String::from_utf8_lossy(&output.stdout));
+    debug!("ffprobe keyframes: {} entries for {}", times.len(), path.display());
     Ok(times)
 }
 
-/// Container `format=start_time` in seconds (0 when absent).
-async fn probe_format_start_time(path: &Path) -> Result<f64> {
+/// Keyframes plus the earliest PTS of their open-GOP *leading* pictures
+/// (packets after the keyframe in decode order but displayed before it — H.264
+/// open-gop B-frames, HEVC RASL after CRA). `lead == key` for closed GOP.
+pub async fn probe_keyframe_index(path: &Path) -> Result<Vec<(f64, f64)>> {
     let output = tokio::process::Command::new(resolve_media_tool_path("ffprobe"))
-        .args(["-v", "error", "-show_entries", "format=start_time", "-of", "default=nw=1:nk=1"])
+        .args(["-v", "error", "-select_streams", "v:0", "-show_entries", "packet=pts_time,dts_time,flags", "-of", "compact=p=1:nk=0"])
         .arg(path)
         .output()
         .await
-        .context("spawn ffprobe start_time probe")?;
-    let raw = String::from_utf8_lossy(&output.stdout);
-    Ok(raw.trim().parse::<f64>().ok().filter(|v| v.is_finite()).unwrap_or(0.0))
+        .context("spawn ffprobe keyframe index")?;
+    if !output.status.success() {
+        bail!("ffprobe keyframe index error: {}", String::from_utf8_lossy(&output.stderr).trim());
+    }
+    Ok(parse_keyframe_index(&String::from_utf8_lossy(&output.stdout)))
+}
+
+fn parse_packet_line(line: &str) -> Option<(f64, bool)> {
+    let (mut pts, mut dts, mut key) = (None, None, false);
+    for kv in line.trim().split('|') {
+        let Some((k, v)) = kv.split_once('=') else { continue };
+        match k {
+            "pts_time" => pts = v.trim().parse::<f64>().ok(),
+            "dts_time" => dts = v.trim().parse::<f64>().ok(),
+            "flags" => key = v.starts_with('K'),
+            _ => {}
+        }
+    }
+    let t = pts.or(dts)?;
+    t.is_finite().then_some((t, key))
+}
+
+/// Decode-order packet list → `(key_pts, lead_start)` sorted by key_pts.
+pub(crate) fn parse_keyframe_index(out: &str) -> Vec<(f64, f64)> {
+    let mut idx: Vec<(f64, f64)> = Vec::new();
+    for (t, key) in out.lines().filter_map(parse_packet_line) {
+        if key {
+            idx.push((t, t));
+        } else if let Some(last) = idx.last_mut() {
+            if t < last.0 - 1e-6 && t < last.1 {
+                last.1 = t;
+            }
+        }
+    }
+    idx.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    idx.dedup_by(|a, b| (a.0 - b.0).abs() < 1e-6);
+    idx
+}
+
+/// Parse `ffprobe -show_entries packet=pts_time,dts_time,flags -of compact` output.
+pub(crate) fn parse_keyframe_packets(out: &str) -> Vec<f64> {
+    let mut times: Vec<f64> = out
+        .lines()
+        .filter_map(parse_packet_line)
+        .filter(|(_, k)| *k)
+        .map(|(t, _)| t.max(0.0))
+        .collect();
+    times.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    times.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
+    times
 }
 
 /// Probe container duration in seconds (`format=duration`).
@@ -371,6 +398,53 @@ pub async fn atomic_replace(target: &Path, new_file: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keyframe_packet_parse_compact_and_na() {
+        let out = "packet|pts_time=0.000000|dts_time=-0.066733|flags=K__\n\
+                   packet|pts_time=0.033367|dts_time=0.000000|flags=___\n\
+                   packet|pts_time=N/A|dts_time=4.004000|flags=K__|side_data|\n\
+                   packet|pts_time=8.008000|dts_time=7.941267|flags=K_D\n\
+                   garbage line,\n";
+        assert_eq!(parse_keyframe_packets(out), vec![0.0, 4.004, 8.008]);
+    }
+
+    #[test]
+    fn keyframe_index_finds_open_gop_leading_pictures() {
+        let out = "packet|pts_time=0.000000|dts_time=-0.03|flags=K__\n\
+                   packet|pts_time=0.066733|dts_time=-0.01|flags=___\n\
+                   packet|pts_time=7.507500|dts_time=7.42|flags=K__\n\
+                   packet|pts_time=7.474133|dts_time=7.44|flags=___\n\
+                   packet|pts_time=7.457450|dts_time=7.45|flags=___\n\
+                   packet|pts_time=7.574233|dts_time=7.49|flags=___\n";
+        let idx = parse_keyframe_index(out);
+        assert_eq!(idx, vec![(0.0, 0.0), (7.5075, 7.45745)]);
+    }
+
+    /// Bilibili-style HEVC mp4 (hvc1, faststart, B-frames, AAC): keyframes must be
+    /// found (was empty on ffmpeg 6.1.2 with the old `-skip_frame nokey` CSV parse)
+    /// and the stable path must snap cut-ins onto them.
+    #[tokio::test]
+    async fn integration_keyframes_hevc_bilibili_style_and_stable_snaps() {
+        let has_x265 = std::process::Command::new("ffmpeg").args(["-hide_banner", "-encoders"]).output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).contains("libx265")).unwrap_or(false);
+        if !has_x265 { eprintln!("skip: no libx265"); return; }
+        let dir = std::env::temp_dir().join(format!("kf-hevc-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("bili.mp4");
+        let st = std::process::Command::new("ffmpeg").args(["-v", "error", "-y",
+            "-f", "lavfi", "-i", "testsrc2=s=640x360:r=30000/1001:d=20",
+            "-f", "lavfi", "-i", "sine=d=20",
+            "-c:v", "libx265", "-x265-params", "keyint=120:min-keyint=120:bframes=4:open-gop=0:log-level=error",
+            "-tag:v", "hvc1", "-c:a", "aac", "-movflags", "+faststart"]).arg(&f).status().unwrap();
+        assert!(st.success());
+        let kfs = probe_video_keyframe_times(&f).await.unwrap();
+        assert_eq!(kfs.len(), 5, "keyframes {:?}", kfs);
+        assert!((kfs[1] - 4.004).abs() < 0.01);
+        let snapped = crate::sponsorblock::timeline::snap_keep_ranges_to_keyframes(&[(0.0, 5.0), (9.3, 20.0)], &kfs);
+        assert!(snapped.iter().any(|(s, _)| (s - 8.008).abs() < 0.01), "not snapped: {:?}", snapped);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn seek_keeps_sub_millisecond_precision() {

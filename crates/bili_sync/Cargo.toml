@@ -92,3 +92,8 @@ release = true
 [[bin]]
 name = "bili-sync-rs"
 path = "src/main.rs"
+
+[[bin]]
+name = "smartcut_probe"
+path = "src/bin/smartcut_probe.rs"
+test = false

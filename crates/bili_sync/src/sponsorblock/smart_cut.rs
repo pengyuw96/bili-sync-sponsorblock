@@ -67,6 +67,24 @@ pub struct SmartCutStats {
 /// subtracted). `frame` is one frame duration; boundaries within half a frame
 /// of a keyframe count as "on the keyframe".
 pub fn plan_pieces(keep: &[(f64, f64)], keyframes: &[f64], frame: f64, duration: f64) -> Vec<Piece> {
+    plan_pieces_open_gop(keep, keyframes, &[], frame, duration)
+}
+
+/// Like [`plan_pieces`], with `leads[i]` = earliest PTS of keyframe i's open-GOP
+/// leading pictures (`== keyframes[i]` when closed; missing ⇒ closed). A copy
+/// piece that ends at keyframe k2 stops at `lead(k2)` instead, because the frames
+/// displayed in `[lead(k2), k2)` are decoded *after* k2 and depend on it; that
+/// short span is re-encoded together with the tail. Leading pictures of the copy
+/// start keyframe are dropped from the copy (they sit in the preceding encode).
+pub fn plan_pieces_open_gop(keep: &[(f64, f64)], keyframes: &[f64], leads: &[f64], frame: f64, duration: f64) -> Vec<Piece> {
+    let lead_of = |k: f64| -> f64 {
+        keyframes
+            .iter()
+            .position(|x| (*x - k).abs() < 1e-9)
+            .and_then(|i| leads.get(i).copied())
+            .map(|l| l.min(k))
+            .unwrap_or(k)
+    };
     let eps = (frame * 0.5).max(1e-4);
     let mut out = Vec::new();
     fn push(out: &mut Vec<Piece>, start: f64, end: f64, kind: PieceKind, eps: f64) {
@@ -79,12 +97,16 @@ pub fn plan_pieces(keep: &[(f64, f64)], keyframes: &[f64], frame: f64, duration:
             continue;
         }
         let at_file_end = e >= duration - eps;
-        // First keyframe at/after s (a keyframe within half a frame before s counts).
-        let k1 = keyframes.iter().copied().find(|k| *k >= s - eps);
+        // First *clean* keyframe at/after s (a keyframe within half a frame before s
+        // counts). Open-GOP keyframes (with leading pictures) are skipped as copy
+        // starts: they are non-IDR (x264 open-gop I / HEVC CRA), so the decoder does
+        // not reset POC/reorder state after our IDR-started encode piece and outputs
+        // frames out of order across the join.
+        let k1 = keyframes.iter().copied().find(|k| *k >= s - eps && lead_of(*k) >= *k - 1e-9);
         // Last keyframe at/before e.
         let k2 = keyframes.iter().rev().copied().find(|k| *k <= e + eps);
         let usable = match (k1, k2) {
-            (Some(k1), Some(k2)) => k1 < e - eps && (k2 > k1 + eps || at_file_end),
+            (Some(k1), Some(k2)) => k1 < e - eps && (lead_of(k2) > k1 + eps || at_file_end),
             _ => false,
         };
         if !usable {
@@ -99,11 +121,12 @@ pub fn plan_pieces(keep: &[(f64, f64)], keyframes: &[f64], frame: f64, duration:
         }
         if at_file_end {
             push(&mut out, copy_from, e, PieceKind::Copy, eps);
-        } else if (e - k2).abs() <= eps {
-            push(&mut out, copy_from, k2, PieceKind::Copy, eps);
         } else {
-            push(&mut out, copy_from, k2, PieceKind::Copy, eps);
-            push(&mut out, k2, e, PieceKind::Encode, eps);
+            let stop = lead_of(k2);
+            push(&mut out, copy_from, stop, PieceKind::Copy, eps);
+            if (e - stop).abs() > eps {
+                push(&mut out, stop, e, PieceKind::Encode, eps);
+            }
         }
     }
     out
@@ -239,9 +262,11 @@ fn audio_encoder(codec: &str) -> Option<&'static str> {
 
 fn annexb_bsf(codec: &str) -> &'static str {
     if codec == "hevc" {
-        "hevc_mp4toannexb"
+        "hevc_mp4toannexb,dump_extra=freq=keyframe"
     } else {
-        "h264_mp4toannexb"
+        // mp4toannexb only prepends SPS/PPS before IDR; an open-GOP I (non-IDR)
+        // copy start would be undecodable without dump_extra.
+        "h264_mp4toannexb,dump_extra=freq=keyframe"
     }
 }
 
@@ -495,7 +520,57 @@ pub async fn smart_cut(
     if keyframes.is_empty() {
         bail!("no keyframes");
     }
-    let pieces = plan_pieces(keep, keyframes, video.frame, duration);
+    // Open-GOP leading pictures per keyframe (same -ss clock as `keyframes`).
+    let index = super::ffmpeg_cut::probe_keyframe_index(input).await.unwrap_or_default();
+    let leads: Vec<f64> = keyframes
+        .iter()
+        .map(|k| {
+            index
+                .iter()
+                .find(|(key, _)| ((key - start_time) - k).abs() < 1e-3)
+                .map(|(key, lead)| k - (key - lead))
+                .unwrap_or(*k)
+        })
+        .collect();
+    // Non-IDR keyframes (x264 open-gop I, HEVC CRA) cannot start a copy piece
+    // even without leading pictures: POC/reorder state is not reset after our
+    // IDR-started encode piece. Mark them "open" (lead just below the key).
+    let leads: Vec<f64> = match probe_keyframe_clean(input, &video.codec).await {
+        Ok(clean) if clean.len() == index.len() => leads
+            .iter()
+            .zip(keyframes)
+            .map(|(l, k)| {
+                let i = index.iter().position(|(key, _)| ((key - start_time) - k).abs() < 1e-3);
+                match i.and_then(|i| clean.get(i)) {
+                    Some(false) => l.min(k - 1e-7),
+                    _ => *l,
+                }
+            })
+            .collect(),
+        Ok(clean) => {
+            debug!("smart cut: IRAP type count {} != keyframes {}; trusting leading-picture scan", clean.len(), index.len());
+            leads
+        }
+        Err(e) => {
+            debug!("smart cut: IRAP type probe failed: {:#}", e);
+            leads
+        }
+    };
+    let open_gop = leads.iter().zip(keyframes).filter(|(l, k)| *l < *k).count();
+    if open_gop > 0 {
+        debug!("smart cut: {} of {} keyframes have open-GOP leading pictures", open_gop, keyframes.len());
+    }
+    let pieces = plan_pieces_open_gop(keep, keyframes, &leads, video.frame, duration);
+    let keep_total: f64 = keep.iter().map(|(s, e)| e - s).sum();
+    let enc_total: f64 = pieces.iter().filter(|p| p.kind == PieceKind::Encode).map(|p| p.end - p.start).sum();
+    if open_gop > 0 && enc_total > keep_total * 0.5 {
+        bail!(
+            "open-GOP source ({} of {} keyframes are non-IDR/CRA or have leading pictures): smart cut would re-encode {:.0}% of the video",
+            open_gop,
+            keyframes.len(),
+            enc_total / keep_total.max(1e-6) * 100.0
+        );
+    }
     if pieces.is_empty() {
         bail!("empty plan");
     }
@@ -505,8 +580,12 @@ pub async fn smart_cut(
     let ts = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
     let tmp = parent.join(format!(".bili-sync-smartcut-{}-{}", std::process::id(), ts));
     fs::create_dir_all(&tmp).await?;
+    // Absolute: the concat list resolves relative entries against its own dir.
+    let tmp = fs::canonicalize(&tmp).await.unwrap_or(tmp);
     let res = smart_cut_inner(input, output, keep, &pieces, keyframes, &video, audio.as_ref(), audio_enc, &plan, start_time, &tmp).await;
-    let _ = fs::remove_dir_all(&tmp).await;
+    if std::env::var_os("BILI_SYNC_SMARTCUT_KEEP_TMP").is_none() {
+        let _ = fs::remove_dir_all(&tmp).await;
+    }
     res
 }
 
@@ -531,22 +610,38 @@ async fn smart_cut_inner(
     };
     let bsf = annexb_bsf(&video.codec);
     let mut list = String::new();
+    let mut parts: Vec<String> = Vec::new();
+    // Output timeline position of each piece. Written into the piece itself
+    // (-output_ts_offset, no mpegts mux delay) and joined with the concat
+    // *protocol*, so PTS are exact by construction. The concat demuxer instead
+    // re-derived offsets from each file's start_time, which for a copy piece is
+    // skewed by the source's deeper B-frame DTS lead (open-GOP x264: 5 frames vs
+    // our 2) and made pieces overlap by 1-3 frames ("non monotonically
+    // increasing dts" in the join check).
+    // +1 s base: mpegts cannot hold negative DTS (B-frame lead of the first
+    // piece) and would otherwise shift that piece alone (avoid_negative_ts).
+    // The final mux normalises the input start back to 0.
+    let mut t_out = 1.0f64;
     for (i, p) in pieces.iter().enumerate() {
         let part = tmp.join(format!("v{:03}.ts", i));
         let mut c = low_prio_ffmpeg();
         c.args(["-v", "error", "-y"]);
         match p.kind {
             PieceKind::Copy => {
-                // `-t`/`-to` on HEVC stream-copy routinely keeps one extra packet
-                // (~0.1–0.2 s). Frame count from the source fps is exact.
-                let nframes = ((p.end - p.start) / video.frame).round().max(1.0) as i64;
+                // Keep exactly the packets displayed in [start, end): drop open-GOP
+                // leading pictures (pts < keyframe pts) and anything at/after end.
+                // `-frames:v` counted decode order and broke on B-frames/open GOP.
+                let span = (p.end - p.start - video.frame * 0.5).max(video.frame * 0.5);
+                let bsf_chain = format!(
+                    "{},noise=amount=0:drop=lt(pts\\,startpts)+gte((pts-startpts)*tb\\,{:.6})",
+                    bsf, span
+                );
                 c.args(["-ss", &format!("{:.6}", p.start)])
                     .arg("-i")
                     .arg(input)
-                    .args(["-frames:v", &nframes.to_string()])
                     .args([
                         "-map", "0:v:0", "-an", "-sn", "-dn", "-map_metadata", "-1", "-map_chapters", "-1",
-                        "-c:v", "copy", "-bsf:v", bsf,
+                        "-c:v", "copy", "-bsf:v", &bsf_chain,
                     ]);
                 stats.copied_secs += p.end - p.start;
             }
@@ -599,15 +694,28 @@ async fn smart_cut_inner(
                 stats.encoded_secs += p.end - p.start;
             }
         }
+        c.args(["-output_ts_offset", &format!("{:.6}", t_out), "-muxdelay", "0", "-muxpreload", "0"]);
         c.args(["-f", "mpegts"]).arg(&part);
         run(c, &format!("smart cut piece {} {:?} via {}", i, p.kind, plan.name)).await?;
+        // Next piece starts one frame after this piece's last displayed frame.
+        // Piece lengths are not whole frames (e.g. 2.366 s = 70.9 frames → 71), so
+        // advancing by the nominal length would overlap the next piece by a few ms.
+        let last = max_packet_pts(&part).await?;
+        if last + 1e-6 < t_out {
+            bail!("smart cut piece {} produced no frames", i);
+        }
+        t_out = last + video.frame;
         list.push_str(&format!("file '{}'\n", part.to_string_lossy().replace('\'', "'\\''")));
+        parts.push(part.to_string_lossy().to_string());
     }
 let list_path = tmp.join("list.txt");
     fs::write(&list_path, list).await?;
 
     let ext = output.extension().and_then(|e| e.to_str()).unwrap_or("mp4").to_ascii_lowercase();
-    let mut inputs: Vec<std::ffi::OsString> = vec!["-f".into(), "concat".into(), "-safe".into(), "0".into(), "-i".into(), list_path.clone().into()];
+    if parts.iter().any(|p| p.contains('|')) {
+        bail!("temp path contains '|'");
+    }
+    let mut inputs: Vec<std::ffi::OsString> = vec!["-i".into(), format!("concat:{}", parts.join("|")).into()];
     let mut maps: Vec<String> = vec!["-map".into(), "0:v:0".into()];
     if let (Some(a), Some(aenc)) = (audio, audio_enc) {
         let audio_path = tmp.join("audio.mka");
@@ -672,6 +780,14 @@ let list_path = tmp.join("list.txt");
         c.args(["-v", "error", "-ss", &format!("{:.3}", (j - 1.0).max(0.0))]).arg("-i").arg(&muxed)
             .args(["-t", "2", "-map", "0:v:0", "-f", "null", "-"]);
         let err = run(c, "smart cut decode check").await?;
+        // H.264 open GOP: dropping the leading (B-pyramid ref) pictures of the copy
+        // start keyframe leaves MMCO ops pointing at absent refs. ffmpeg warns
+        // "mmco: unref short failure" but output frames are unaffected.
+        let err: String = err
+            .lines()
+            .filter(|l| !l.contains("mmco: unref short failure") && !l.trim_start().starts_with("Last message repeated"))
+            .collect::<Vec<_>>()
+            .join("\n");
         if !err.trim().is_empty() {
             bail!("decode errors near join {:.3}s: {}", j, err.trim());
         }
@@ -689,6 +805,55 @@ let list_path = tmp.join("list.txt");
     );
     debug!("smart cut pieces: {:?}", pieces);
     Ok(stats)
+}
+
+/// For each keyframe packet (decode order = PTS order for keyframes) whether it
+/// is a clean random access point that resets decoding: H.264 IDR (5), HEVC
+/// BLA/IDR (16-20). x264 open-gop I (1) and HEVC CRA (21) are not.
+async fn probe_keyframe_clean(input: &Path, codec: &str) -> Result<Vec<bool>> {
+    let types = if codec == "hevc" { "16-21" } else { "1-5" };
+    let out = Command::new(tool("ffmpeg"))
+        .args(["-hide_banner", "-nostats", "-v", "info", "-i"])
+        .arg(input)
+        .args(["-map", "0:v:0", "-c:v", "copy", "-bsf:v"])
+        .arg(format!("noise=amount=0:drop=not(key),filter_units=pass_types={},trace_headers", types))
+        .args(["-f", "null", "-"])
+        .output()
+        .await
+        .context("spawn ffmpeg trace_headers")?;
+    Ok(parse_irap_trace(&String::from_utf8_lossy(&out.stderr), codec))
+}
+
+pub(crate) fn parse_irap_trace(log: &str, codec: &str) -> Vec<bool> {
+    let mut res = Vec::new();
+    let mut want = false;
+    for line in log.lines() {
+        if line.contains("Packet:") && line.contains("key frame") {
+            want = true;
+            continue;
+        }
+        if want && line.contains("nal_unit_type") {
+            if let Some(t) = line.rsplit('=').next().and_then(|v| v.trim().parse::<u32>().ok()) {
+                res.push(if codec == "hevc" { (16..=20).contains(&t) } else { t == 5 });
+                want = false;
+            }
+        }
+    }
+    res
+}
+
+async fn max_packet_pts(path: &Path) -> Result<f64> {
+    let out = Command::new(tool("ffprobe"))
+        .args(["-v", "error", "-select_streams", "v:0", "-show_entries", "packet=pts_time", "-of", "csv=p=0"])
+        .arg(path)
+        .output()
+        .await
+        .context("spawn ffprobe piece pts")?;
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| l.split(',').next()?.trim().parse::<f64>().ok())
+        .fold(None, |m: Option<f64>, t| Some(m.map_or(t, |m| m.max(t))))
+        .context("piece has no video packets")
 }
 
 async fn probe_video_stream_duration(path: &Path) -> Result<f64> {
@@ -789,8 +954,8 @@ mod tests {
         v.profile = "Main".into();
         v.pix_fmt = "yuv420p10le".into();
         assert!(encode_args_software(&v).is_err());
-        assert_eq!(annexb_bsf("hevc"), "hevc_mp4toannexb");
-        assert_eq!(annexb_bsf("h264"), "h264_mp4toannexb");
+        assert_eq!(annexb_bsf("hevc"), "hevc_mp4toannexb,dump_extra=freq=keyframe");
+        assert_eq!(annexb_bsf("h264"), "h264_mp4toannexb,dump_extra=freq=keyframe");
     }
 
     // ---------- integration (needs ffmpeg with libx264 on PATH) ----------
@@ -811,7 +976,7 @@ mod tests {
         // fields after ')' start at index 0 = state(3); cutime=16, cstime=17 (1-based) → 13,14
         let tick = 100.0;
         let g = |i: usize| f.get(i).and_then(|x| x.parse::<f64>().ok()).unwrap_or(0.0);
-        (g(13) + g(14)) / tick
+        (g(13) + g(14) + g(15) + g(16)) / tick
     }
 
     fn gen(path: &Path, vcodec: &[&str], size: &str) {
@@ -1039,5 +1204,102 @@ mod tests {
         let d = std::env::temp_dir().join(format!("{}-{}-{}", tag, std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    #[test]
+    fn plan_open_gop_copy_stops_before_leading_pictures_and_skips_unclean_starts() {
+        // keyframes 0,4,8,12 ; 8 is open-GOP with leading pictures from 7.9
+        let k = vec![0.0, 4.0, 8.0, 12.0];
+        let leads = vec![0.0, 4.0, 7.9, 12.0];
+        let p = plan_pieces_open_gop(&[(1.0, 9.0)], &k, &leads, F, 20.0);
+        // copy 4 → 7.9 (not 8: frames in [7.9,8) decode after key 8), encode the rest
+        assert_eq!(p[0].kind, PieceKind::Encode);
+        assert!((p[0].end - 4.0).abs() < 1e-9);
+        assert_eq!(p[1].kind, PieceKind::Copy);
+        assert!((p[1].end - 7.9).abs() < 1e-9, "{:?}", p);
+        assert_eq!(p[2].kind, PieceKind::Encode);
+        assert!((p[2].start - 7.9).abs() < 1e-9 && (p[2].end - 9.0).abs() < 1e-9);
+        // a keep starting at 7.5: key 8 is unclean → never a copy start
+        let p = plan_pieces_open_gop(&[(7.5, 11.0)], &k, &leads, F, 20.0);
+        assert!(p.iter().all(|x| x.kind == PieceKind::Encode), "{:?}", p);
+        // empty leads == closed GOP == plan_pieces
+        let a = plan_pieces_open_gop(&[(1.0, 9.0)], &k, &[], F, 20.0);
+        assert_eq!(a, plan_pieces(&[(1.0, 9.0)], &k, F, 20.0));
+    }
+
+    #[test]
+    fn irap_trace_parse() {
+        let log = "[trace_headers @ 0x1] Packet: 21330 bytes, key frame, pts 0, dts -2002.\n\
+                   [trace_headers @ 0x1] 3           nal_unit_type          00101 = 5\n\
+                   size=0kB [trace_headers @ 0x1] Packet: 28536 bytes, key frame, pts 450450.\n\
+                   [trace_headers @ 0x1] 3           nal_unit_type          00001 = 1\n";
+        assert_eq!(parse_irap_trace(log, "h264"), vec![true, false]);
+        let log = "Packet: 1 bytes, key frame\n x nal_unit_type 010100 = 20\nPacket: 1 bytes, key frame\n x nal_unit_type 010101 = 21\n";
+        assert_eq!(parse_irap_trace(log, "hevc"), vec![true, false]);
+    }
+
+    fn decode_errors(p: &Path) -> String {
+        let dec = std::process::Command::new("ffmpeg").args(["-v", "error", "-i"]).arg(p).args(["-f", "null", "-"]).output().unwrap();
+        String::from_utf8_lossy(&dec.stderr).trim().to_string()
+    }
+
+    fn gen60(path: &Path, x264: &[&str]) {
+        let st = std::process::Command::new("ffmpeg")
+            .args(["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=60000/1001", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "30"])
+            .args(["-c:v", "libx264", "-preset", "medium", "-pix_fmt", "yuv420p"])
+            .args(x264)
+            .args(["-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", "-shortest"])
+            .arg(path)
+            .status()
+            .unwrap();
+        assert!(st.success());
+    }
+
+    /// 3b1b-style source: 59.94 fps, x264 medium with B-frames (bf=3, B-pyramid →
+    /// DTS lead 2 frames), long-ish GOP, piece lengths that are not whole frames.
+    /// Used to overlap pieces at the joins ("non monotonically increasing dts").
+    #[tokio::test]
+    async fn integration_smart_cut_h264_bframes_joins_monotonic() {
+        if !have_ffmpeg() {
+            eprintln!("skip: ffmpeg/libx264 missing");
+            return;
+        }
+        let dir = tempfile_dir("smartcut-h264-bf3");
+        let input = dir.join("in.mp4");
+        gen60(&input, &["-bf", "3", "-g", "300", "-keyint_min", "300", "-sc_threshold", "0"]);
+        let kfs = super::super::ffmpeg_cut::probe_video_keyframe_times(&input).await.unwrap();
+        assert!(kfs.len() >= 5 && kfs[0] == 0.0, "{:?}", kfs);
+        let keep = vec![(0.0, 6.37), (12.61, 18.13), (21.5, 29.9)];
+        let out = dir.join("out.mp4");
+        let stats = smart_cut(&input, &out, &keep, &kfs, 30.0).await.expect("smart cut");
+        assert!(stats.copied_secs > 4.0, "should copy whole GOPs: {:?}", stats);
+        let expected: f64 = keep.iter().map(|(s, e)| e - s).sum();
+        let (vd, ad, _) = stream_durations(&out).await;
+        assert!((vd - expected).abs() <= 3.0 / 59.94, "video {} vs {}", vd, expected);
+        assert!((ad - vd).abs() < 0.06, "A/V desync: audio {} video {}", ad, vd);
+        let err = decode_errors(&out);
+        assert!(err.is_empty(), "decode errors: {}", err);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// x264 open-gop: keyframes are non-IDR I with leading B-frames. Copying from
+    /// them broke the join (PPS missing, POC reorder). Must refuse cleanly so the
+    /// caller falls back to stable — never emit a broken file.
+    #[tokio::test]
+    async fn integration_h264_open_gop_refused_cleanly() {
+        if !have_ffmpeg() {
+            eprintln!("skip: ffmpeg/libx264 missing");
+            return;
+        }
+        let dir = tempfile_dir("smartcut-h264-open");
+        let input = dir.join("in.mp4");
+        gen60(&input, &["-bf", "3", "-g", "450", "-x264-params", "open-gop=1"]);
+        let kfs = super::super::ffmpeg_cut::probe_video_keyframe_times(&input).await.unwrap();
+        let out = dir.join("out.mp4");
+        match smart_cut(&input, &out, &[(0.0, 8.37), (16.61, 24.13), (27.5, 29.9)], &kfs, 30.0).await {
+            Ok(_) => assert!(decode_errors(&out).is_empty(), "accepted but broken"),
+            Err(e) => assert!(format!("{:#}", e).contains("open-GOP"), "unexpected error: {:#}", e),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -143,3 +143,16 @@ ffmpeg -i /path/to/media.mp4 2>&1 | grep -A2 Chapter
 - **NAS container (not applied yet):** add device `/dev/dri` (e.g. `- /dev/dri:/dev/dri`), ensure the process user can open `renderD*` (often group `render` / `video`). Image ffmpeg must list `hevc_qsv` or `hevc_vaapi` (Alpine 3.22 stock ffmpeg 6.1.2 links libx265 + libvpl; confirm QSV inside the running container before relying on HW).
 - **Do not bump to ffmpeg 8** for this feature alone: Alpine 3.22 pins 6.1.2; edge 8.x is a distro jump. Stream-copy/concat are I/O-bound; short re-encodes are encoder-bound (x265 / QSV), not demuxer-version-bound.
 
+
+### Smart cut fixes (2026-10-15, NAS test round 1)
+- Keyframe probe: `-skip_frame nokey -show_entries frame=pts_time -of csv` printed
+  `0.000000,` (extra column) on ffmpeg 6.1.2 → first keyframe dropped (H.264) or the
+  whole list empty (Bilibili HEVC). Now packet flags via `compact` key=value
+  (`packet=pts_time,dts_time,flags`, K rows, dts fallback). Affects stable snap too.
+- Joins: pieces now carry absolute timestamps (`-output_ts_offset`, mux delay 0, +1 s
+  base) and are joined with the concat *protocol*; next offset = last piece PTS + 1
+  frame. Copy pieces select frames by PTS window (`noise=drop=`) instead of
+  `-frames:v`, drop open-GOP leading pictures, and get SPS/PPS via `dump_extra`.
+- Open GOP (x264 open-gop non-IDR I, HEVC CRA, detected via `trace_headers` on
+  keyframes + leading-picture scan) is never a copy start; if that pushes re-encode
+  above 50 % of the keep, smart cut refuses → stable.

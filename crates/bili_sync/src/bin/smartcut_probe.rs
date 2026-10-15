@@ -8,6 +8,8 @@ mod downloader {
 }
 #[path = "../sponsorblock/smart_cut.rs"]
 mod smart_cut;
+#[path = "../sponsorblock/ffmpeg_cut.rs"]
+mod ffmpeg_cut;
 
 use std::path::Path;
 
@@ -15,7 +17,7 @@ fn children_cpu() -> f64 {
     let s = std::fs::read_to_string("/proc/self/stat").unwrap_or_default();
     let f: Vec<&str> = s.rsplit_once(')').map(|x| x.1).unwrap_or("").split_whitespace().collect();
     let g = |i: usize| f.get(i).and_then(|x| x.parse::<f64>().ok()).unwrap_or(0.0);
-    (g(13) + g(14)) / 100.0
+    (g(13) + g(14) + g(15) + g(16)) / 100.0
 }
 
 async fn ffprobe(args: &[&str], p: &Path) -> String {
@@ -39,8 +41,9 @@ async fn main() -> anyhow::Result<()> {
         .await.trim().parse().unwrap_or(0.0);
     let dur: f64 = ffprobe(&["-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1"], input)
         .await.trim().parse()?;
-    let mut kfs: Vec<f64> = ffprobe(&["-v", "error", "-select_streams", "v:0", "-skip_frame", "nokey", "-show_entries", "frame=pts_time", "-of", "csv=p=0"], input)
-        .await.lines().filter_map(|l| l.trim().parse::<f64>().ok()).map(|t| (t - start).max(0.0)).collect();
+    // Same keyframe probe as production (packet flags), on the -ss clock.
+    let mut kfs: Vec<f64> = ffmpeg_cut::probe_video_keyframe_times(input).await?
+        .into_iter().map(|t| (t - start).max(0.0)).collect();
     kfs.sort_by(|x, y| x.partial_cmp(y).unwrap());
     kfs.dedup();
     let gaps: Vec<f64> = kfs.windows(2).map(|w| w[1] - w[0]).collect();
