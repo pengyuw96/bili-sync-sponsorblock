@@ -421,15 +421,15 @@ fn hevc_software_plan(v: &VideoParams) -> Result<EncodePlan> {
 }
 
 fn hevc_qsv_plan(v: &VideoParams) -> EncodePlan {
-    // QSV: no software -threads; look_ahead off for short GOP slivers.
-    let mut args: Vec<String> = [
-        // No `-look_ahead` (h264_qsv-only option; unknown to hevc_qsv in ffmpeg 6.1).
-        "-c:v", "hevc_qsv", "-preset", "veryfast", "-global_quality", "23",
-        "-profile:v", "main",
-    ]
-    .map(String::from)
-    .to_vec();
-    args.extend(["-pix_fmt".into(), "nv12".into(), "-s".into(), format!("{}x{}", v.width, v.height)]);
+    // Minimal options: on Jasper Lake + ffmpeg 6.1 `-preset`/`-global_quality`
+    // made the encoder open fail ("Function not implemented"), while a plain
+    // nv12 -> hevc_qsv encode works. Bitrate scaled to resolution (~6 Mb/s @1080p).
+    let br = ((v.width * v.height) as f64 * 3.0).max(1_000_000.0) as u64;
+    let args: Vec<String> = vec![
+        "-c:v".into(), "hevc_qsv".into(), "-profile:v".into(), "main".into(),
+        "-pix_fmt".into(), "nv12".into(), "-b:v".into(), br.to_string(),
+        "-maxrate".into(), (br * 2).to_string(),
+    ];
     EncodePlan {
         name: "hevc_qsv".into(),
         args,
@@ -472,14 +472,7 @@ pub(crate) async fn select_encode_plan(v: &VideoParams) -> Result<EncodePlan> {
                 );
             }
             let dri = dri_render_nodes();
-            if !dri.is_empty() && ffmpeg_lists_encoder("hevc_qsv") {
-                let plan = hevc_qsv_plan(v);
-                if probe_encoder(&plan, (v.width.min(320), v.height.min(180))).await {
-                    info!("SponsorBlock smart cut: using hevc_qsv");
-                    return Ok(plan);
-                }
-                debug!("hevc_qsv listed but probe encode failed; trying vaapi/libx265");
-            }
+            // VAAPI first: verified on the NAS (N5095); QSV is the second choice.
             if !dri.is_empty() && ffmpeg_lists_encoder("hevc_vaapi") {
                 for node in &dri {
                     let plan = hevc_vaapi_plan(v, node);
@@ -488,7 +481,15 @@ pub(crate) async fn select_encode_plan(v: &VideoParams) -> Result<EncodePlan> {
                         return Ok(plan);
                     }
                 }
-                debug!("hevc_vaapi probe failed on all render nodes; trying libx265");
+                debug!("hevc_vaapi probe failed on all render nodes; trying hevc_qsv");
+            }
+            if !dri.is_empty() && ffmpeg_lists_encoder("hevc_qsv") {
+                let plan = hevc_qsv_plan(v);
+                if probe_encoder(&plan, (v.width.min(320), v.height.min(180))).await {
+                    info!("SponsorBlock smart cut: using hevc_qsv");
+                    return Ok(plan);
+                }
+                debug!("hevc_qsv listed but probe encode failed; trying libx265");
             }
             if ffmpeg_lists_encoder("libx265") {
                 let plan = hevc_software_plan(v)?;
@@ -698,7 +699,18 @@ async fn smart_cut_inner(
                     }
                     args.push(a.clone());
                 }
-                c.args(["-vf", &trim]);
+                // passthrough: never duplicate/drop frames to make CFR. With the
+                // default (auto → cfr for some muxer/encoder combos) a VFR source
+                // (Bilibili avg 51206400/1706881) gained duplicated frames per
+                // encode piece and the output came out ~0.3 s long.
+                c.args(["-vf", &trim, "-fps_mode", "passthrough"]);
+                // Frame-exact cap from the source packets in [start, end): guards
+                // against any encoder/filter (e.g. VAAPI hwupload) emitting extras.
+                if let Ok(n) = count_source_frames(input, p.start + start_time, p.end + start_time).await {
+                    if n > 0 {
+                        c.args(["-frames:v", &n.to_string()]);
+                    }
+                }
                 for a in &args {
                     c.arg(a);
                 }
@@ -711,7 +723,16 @@ async fn smart_cut_inner(
         // Next piece starts one frame after this piece's last displayed frame.
         // Piece lengths are not whole frames (e.g. 2.366 s = 70.9 frames → 71), so
         // advancing by the nominal length would overlap the next piece by a few ms.
-        let last = max_packet_pts(&part).await?;
+        let last = match max_packet_pts(&part).await {
+            Ok(t) => t,
+            // e.g. keep starts at 0 but the first video frame is at 0.033 (audio
+            // starts first): the [0, first frame) sliver has no frames. Skip it.
+            Err(_) if p.kind == PieceKind::Encode && p.end - p.start <= video.frame * 2.5 => {
+                let _ = fs::remove_file(&part).await;
+                continue;
+            }
+            Err(e) => return Err(e.context(format!("smart cut piece {}", i))),
+        };
         if last + 1e-6 < t_out {
             bail!("smart cut piece {} produced no frames", i);
         }
@@ -851,6 +872,24 @@ pub(crate) fn parse_irap_trace(log: &str, codec: &str) -> Vec<bool> {
         }
     }
     res
+}
+
+/// Video packets of `input` whose PTS lies in [start, end) (absolute seconds).
+async fn count_source_frames(input: &Path, start: f64, end: f64) -> Result<usize> {
+    let out = Command::new(tool("ffprobe"))
+        .args(["-v", "error", "-select_streams", "v:0", "-read_intervals"])
+        .arg(format!("{:.6}%{:.6}", (start - 10.0).max(0.0), end + 2.0))
+        .args(["-show_entries", "packet=pts_time", "-of", "csv=p=0"])
+        .arg(input)
+        .output()
+        .await
+        .context("spawn ffprobe frame count")?;
+    let eps = 1e-4;
+    Ok(String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| l.split(',').next()?.trim().parse::<f64>().ok())
+        .filter(|t| *t >= start - eps && *t < end - eps)
+        .count())
 }
 
 async fn max_packet_pts(path: &Path) -> Result<f64> {
@@ -1311,6 +1350,37 @@ mod tests {
             Ok(_) => assert!(decode_errors(&out).is_empty(), "accepted but broken"),
             Err(e) => assert!(format!("{:#}", e).contains("open-GOP"), "unexpected error: {:#}", e),
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Bilibili-like VFR HEVC: odd average fps (every 37th frame missing, first
+    /// video frame at 0.033 s while audio starts at 0). Encode pieces must be
+    /// frame-exact (passthrough + source frame cap) and an empty [0, first frame)
+    /// sliver must be skipped instead of failing the cut.
+    #[tokio::test]
+    async fn integration_smart_cut_hevc_vfr_frame_exact() {
+        let has_x265 = std::process::Command::new("ffmpeg").args(["-hide_banner", "-encoders"]).output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).contains("libx265")).unwrap_or(false);
+        if !has_x265 { eprintln!("skip: no libx265"); return; }
+        let dir = tempfile_dir("smartcut-hevc-vfr");
+        let input = dir.join("in.mp4");
+        let st = std::process::Command::new("ffmpeg")
+            .args(["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=640x360:r=30:d=40", "-f", "lavfi", "-i", "sine=d=40",
+                "-vf", "select='not(eq(mod(n\\,37)\\,0))'", "-fps_mode", "vfr",
+                "-c:v", "libx265", "-x265-params", "keyint=150:min-keyint=150:open-gop=0:log-level=error",
+                "-tag:v", "hvc1", "-c:a", "aac", "-movflags", "+faststart"])
+            .arg(&input).status().unwrap();
+        assert!(st.success());
+        let kfs = super::super::ffmpeg_cut::probe_video_keyframe_times(&input).await.unwrap();
+        let keep = vec![(0.0, 8.37), (16.61, 24.13), (27.5, 40.0)];
+        let out = dir.join("out.mp4");
+        smart_cut(&input, &out, &keep, &kfs, 40.0).await.expect("smart cut");
+        let expected: f64 = keep.iter().map(|(s, e)| e - s).sum();
+        let (vd, ad, _) = stream_durations(&out).await;
+        assert!((vd - expected).abs() <= 0.1, "video {} vs {}", vd, expected);
+        assert!((ad - vd).abs() < 0.12, "A/V desync: audio {} video {}", ad, vd);
+        let err = decode_errors(&out);
+        assert!(err.is_empty(), "decode errors: {}", err);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
