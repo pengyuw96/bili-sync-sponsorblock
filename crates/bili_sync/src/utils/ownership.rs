@@ -47,7 +47,7 @@ pub fn init_process_umask() {
     }
 }
 
-/// 遍历 root（含自身），把归属不符的条目改为 owner。返回修改数量。
+/// 遍历 root（含自身），把 uid 0 的条目改为 owner（gid 0 时才改组）。返回修改数量。
 pub fn fix_tree_with(root: &Path, owner: Owner) -> usize {
     #[cfg(unix)]
     {
@@ -56,10 +56,12 @@ pub fn fix_tree_with(root: &Path, owner: Owner) -> usize {
         let mut stack: Vec<PathBuf> = vec![root.to_path_buf()];
         while let Some(p) = stack.pop() {
             let Ok(md) = std::fs::symlink_metadata(&p) else { continue };
-            if (md.uid() != owner.uid || md.gid() != owner.gid)
-                && std::os::unix::fs::lchown(&p, Some(owner.uid), Some(owner.gid)).is_ok()
-            {
-                changed += 1;
+            // 只修正 root 新建的条目（uid 0）；gid 仅在其为 0 时改为 PGID，保留其它用户/组原有归属
+            if md.uid() == 0 {
+                let gid = if md.gid() == 0 { Some(owner.gid) } else { None };
+                if std::os::unix::fs::lchown(&p, Some(owner.uid), gid).is_ok() {
+                    changed += 1;
+                }
             }
             if md.file_type().is_dir() {
                 if let Ok(rd) = std::fs::read_dir(&p) {
@@ -137,10 +139,21 @@ mod tests {
         std::os::unix::fs::symlink("/nonexistent", d.path().join("a/link")).unwrap();
         let md = std::fs::metadata(d.path()).unwrap();
         let me = Owner { uid: md.uid(), gid: md.gid() };
-        assert_eq!(fix_tree_with(d.path(), me), 0);
+        if me.uid != 0 {
+            assert_eq!(fix_tree_with(d.path(), me), 0);
+        }
         if unsafe { libc::geteuid() } == 0 {
+            // 非 root 归属的条目不得被改动
+            std::fs::write(d.path().join("other.txt"), b"y").unwrap();
+            std::os::unix::fs::lchown(d.path().join("other.txt"), Some(1234), Some(4321)).unwrap();
+            std::fs::write(d.path().join("rootgrp.txt"), b"y").unwrap();
+            std::os::unix::fs::lchown(d.path().join("rootgrp.txt"), Some(0), Some(77)).unwrap();
             let o = Owner { uid: 2601, gid: 1113 };
-            assert_eq!(fix_tree_with(d.path(), o), 5);
+            assert_eq!(fix_tree_with(d.path(), o), 6);
+            let m = std::fs::symlink_metadata(d.path().join("other.txt")).unwrap();
+            assert_eq!((m.uid(), m.gid()), (1234, 4321));
+            let m = std::fs::symlink_metadata(d.path().join("rootgrp.txt")).unwrap();
+            assert_eq!((m.uid(), m.gid()), (2601, 77));
             for p in ["", "a", "a/b", "a/b/f.nfo"] {
                 let m = std::fs::symlink_metadata(d.path().join(p)).unwrap();
                 assert_eq!((m.uid(), m.gid()), (2601, 1113));
