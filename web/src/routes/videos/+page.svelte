@@ -213,6 +213,14 @@
 	let selectedVideos: Set<number> = new Set();
 	let batchDeleting = false;
 	let batchDeleteDialogOpen = false;
+	let selectingAllMatching = false;
+	let crossPageSelection = false;
+	let crossPageFilterKey = '';
+	function currentFilterKey(): string {
+		const { videoSource, query, showFailedOnly, minHeight, maxHeight } = $appStateStore;
+		return JSON.stringify([platformTab, videoSource, query, showFailedOnly, minHeight, maxHeight]);
+	}
+	let batchDeleteProgress = '';
 
 	function loadDisplayPrefs() {
 		if (typeof localStorage === 'undefined') return;
@@ -459,7 +467,12 @@
 		);
 		pendingInsertedCount = 0;
 
-		if (selectionMode) {
+		if (crossPageSelection && crossPageFilterKey !== currentFilterKey()) {
+			// 筛选条件变了，跨页选中失效，避免误删
+			crossPageSelection = false;
+			selectedVideos = new Set();
+		}
+		if (selectionMode && !crossPageSelection) {
 			const visibleIds = new Set(data.videos.map((video) => video.id));
 			const nextSelected = new Set(Array.from(selectedVideos).filter((id) => visibleIds.has(id)));
 			if (nextSelected.size !== selectedVideos.size) {
@@ -950,7 +963,47 @@
 		}
 	}
 
+	// 跨页全选：按当前筛选（平台/视频源/搜索/失败/分辨率）分批拉取全部匹配视频 ID
+	async function selectAllMatchingVideos() {
+		if (selectingAllMatching) return;
+		selectingAllMatching = true;
+		try {
+			const { videoSource, query: queryWord, showFailedOnly, minHeight, maxHeight } = $appStateStore;
+			const BATCH = 200;
+			const ids = new Set<number>();
+			let total = Infinity;
+			for (let p = 0; p * BATCH < total && p < 1000; p++) {
+				const req = buildVideosRequest({
+					platform: platformTab,
+					page: p,
+					pageSize: BATCH,
+					query: queryWord,
+					videoSource,
+					showFailedOnly,
+					minHeight,
+					maxHeight,
+					sortBy: 'id',
+					sortOrder: 'desc'
+				});
+				const res = await api.getVideos(req);
+				total = res.data.total_count;
+				if (!res.data.videos.length) break;
+				res.data.videos.forEach((v) => ids.add(v.id));
+			}
+			selectedVideos = ids;
+			crossPageSelection = true;
+			crossPageFilterKey = currentFilterKey();
+			toast.success(`已选中全部 ${ids.size} 个匹配视频`);
+		} catch (error) {
+			console.error('跨页全选失败:', error);
+			toast.error('全选全部失败');
+		} finally {
+			selectingAllMatching = false;
+		}
+	}
+
 	function clearSelection() {
+		crossPageSelection = false;
 		selectedVideos.clear();
 		selectedVideos = selectedVideos;
 	}
@@ -972,6 +1025,7 @@
 		try {
 			for (let i = 0; i < selectedVideoIds.length; i++) {
 				const videoId = selectedVideoIds[i];
+				batchDeleteProgress = `${i + 1} / ${selectedVideoIds.length}`;
 				try {
 					const result = await api.deleteVideo(
 						platformTab === 'bilibili' ? videoId : `${platformTab}-${videoId}`
@@ -1038,6 +1092,7 @@
 			});
 		} finally {
 			batchDeleting = false;
+			batchDeleteProgress = '';
 			batchDeleteDialogOpen = false;
 		}
 	}
@@ -1241,6 +1296,14 @@
 							/>
 							全选本页
 						</label>
+						<Button
+							variant="outline"
+							size="sm"
+							onclick={selectAllMatchingVideos}
+							disabled={selectingAllMatching || batchDeleting}
+						>
+							{selectingAllMatching ? '正在全选…' : `全选全部 (${videosData.total_count})`}
+						</Button>
 					{/if}
 					{#if selectedVideos.size > 0}
 						<Button variant="outline" size="sm" onclick={clearSelection}>取消选中</Button>
@@ -1674,7 +1737,10 @@
 		<AlertDialog.Header>
 			<AlertDialog.Title>确认批量删除视频</AlertDialog.Title>
 			<AlertDialog.Description>
-				确定要删除选中的 <span class="font-medium text-red-600">{selectedVideos.size}</span> 个视频吗？
+				确定要删除选中的 <span class="font-medium text-red-600">{selectedVideos.size}</span> 个视频吗？（会逐个顺序删除）
+				{#if batchDeleting && batchDeleteProgress}
+					<div class="mt-2 text-sm">正在删除 {batchDeleteProgress}，请勿关闭页面…</div>
+				{/if}
 			</AlertDialog.Description>
 		</AlertDialog.Header>
 		<div class="py-4">
