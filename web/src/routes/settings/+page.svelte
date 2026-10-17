@@ -8,6 +8,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { CustomSelect } from '$lib/components/ui/select';
 	import { SheetFooter } from '$lib/components/ui/sheet';
+	import { Switch } from '$lib/components/ui/switch';
 	import * as Tabs from '$lib/components/ui/tabs';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import QrLogin from '$lib/components/qr-login.svelte';
