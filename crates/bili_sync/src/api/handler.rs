@@ -11237,6 +11237,20 @@ pub async fn get_config() -> Result<ApiResponse<crate::api::response::ConfigResp
         no_dolby_audio: config.filter_option.no_dolby_audio,
         no_hdr: config.filter_option.no_hdr,
         no_hires: config.filter_option.no_hires,
+        youtube_filter_option: {
+            let y = &config.youtube_filter_option;
+            crate::api::response::YoutubeFilterOptionResponse {
+                video_max_height: y.video_max_height,
+                video_min_height: y.video_min_height,
+                codecs: y.codecs.iter().map(|c| c.to_string()).collect(),
+                audio_max_bitrate: y.audio_max_bitrate,
+                audio_min_bitrate: y.audio_min_bitrate,
+                no_dolby_video: y.no_dolby_video,
+                no_dolby_audio: y.no_dolby_audio,
+                no_hdr: y.no_hdr,
+                no_hires: y.no_hires,
+            }
+        },
         // 弹幕设置
         danmaku_duration: config.danmaku_option.duration,
         danmaku_font: config.danmaku_option.font.clone(),
@@ -12119,6 +12133,16 @@ fn config_update_field_display_name(field: &str) -> String {
         "ai_rename" => Some("AI重命名配置"),
         "sponsor_block" => Some("SponsorBlock裁剪配置（B站）"),
         "sponsor_block_youtube" => Some("SponsorBlock裁剪配置（YouTube）"),
+        "youtube_filter_option" => Some("YouTube画质与编码"),
+        "youtube_video_max_height" => Some("YouTube最高分辨率"),
+        "youtube_video_min_height" => Some("YouTube最低分辨率"),
+        "youtube_codecs" => Some("YouTube编码优先级"),
+        "youtube_audio_max_bitrate" => Some("YouTube音频最高码率"),
+        "youtube_audio_min_bitrate" => Some("YouTube音频最低码率"),
+        "youtube_no_dolby_video" => Some("YouTube禁用杜比视界"),
+        "youtube_no_dolby_audio" => Some("YouTube禁用杜比音频"),
+        "youtube_no_hdr" => Some("YouTube禁用HDR"),
+        "youtube_no_hires" => Some("YouTube禁用Hi-Res音频"),
         "media_server" => Some("Emby/Jellyfin扫描通知"),
         _ => None,
     };
@@ -12639,6 +12663,83 @@ pub async fn update_config_internal(
             config.filter_option.no_hires = no_hires;
             updated_fields.push("no_hires");
         }
+    }
+
+    // YouTube 画质设置（独立）
+    {
+        let y = &mut config.youtube_filter_option;
+        let mut touched = false;
+        if let Some(h) = params.youtube_video_max_height {
+            if h != y.video_max_height {
+                y.video_max_height = h;
+                touched = true;
+                updated_fields.push("youtube_video_max_height");
+            }
+        }
+        if let Some(h) = params.youtube_video_min_height {
+            if h != y.video_min_height {
+                y.video_min_height = h;
+                touched = true;
+                updated_fields.push("youtube_video_min_height");
+            }
+        }
+        if let Some(codecs) = &params.youtube_codecs {
+            use crate::config::YoutubeVideoCodec;
+            let mut new_codecs = Vec::new();
+            for codec_str in codecs {
+                if let Ok(codec) = codec_str.parse::<YoutubeVideoCodec>() {
+                    new_codecs.push(codec);
+                }
+            }
+            if !new_codecs.is_empty() && new_codecs != y.codecs {
+                y.codecs = new_codecs;
+                touched = true;
+                updated_fields.push("youtube_codecs");
+            }
+        }
+        if let Some(v) = params.youtube_audio_max_bitrate {
+            if v != y.audio_max_bitrate {
+                y.audio_max_bitrate = v;
+                touched = true;
+                updated_fields.push("youtube_audio_max_bitrate");
+            }
+        }
+        if let Some(v) = params.youtube_audio_min_bitrate {
+            if v != y.audio_min_bitrate {
+                y.audio_min_bitrate = v;
+                touched = true;
+                updated_fields.push("youtube_audio_min_bitrate");
+            }
+        }
+        if let Some(v) = params.youtube_no_dolby_video {
+            if v != y.no_dolby_video {
+                y.no_dolby_video = v;
+                touched = true;
+                updated_fields.push("youtube_no_dolby_video");
+            }
+        }
+        if let Some(v) = params.youtube_no_dolby_audio {
+            if v != y.no_dolby_audio {
+                y.no_dolby_audio = v;
+                touched = true;
+                updated_fields.push("youtube_no_dolby_audio");
+            }
+        }
+        if let Some(v) = params.youtube_no_hdr {
+            if v != y.no_hdr {
+                y.no_hdr = v;
+                touched = true;
+                updated_fields.push("youtube_no_hdr");
+            }
+        }
+        if let Some(v) = params.youtube_no_hires {
+            if v != y.no_hires {
+                y.no_hires = v;
+                touched = true;
+                updated_fields.push("youtube_no_hires");
+            }
+        }
+        let _ = touched;
     }
 
     // 处理弹幕设置
@@ -13984,6 +14085,23 @@ pub async fn update_config_internal(
                 | "no_dolby_video" | "no_dolby_audio" | "no_hdr" | "no_hires" => {
                     manager
                         .update_config_item("filter_option", serde_json::to_value(&config.filter_option)?)
+                        .await
+                }
+                "youtube_video_max_height"
+                | "youtube_video_min_height"
+                | "youtube_codecs"
+                | "youtube_audio_max_bitrate"
+                | "youtube_audio_min_bitrate"
+                | "youtube_no_dolby_video"
+                | "youtube_no_dolby_audio"
+                | "youtube_no_hdr"
+                | "youtube_no_hires"
+                | "youtube_filter_option" => {
+                    manager
+                        .update_config_item(
+                            "youtube_filter_option",
+                            serde_json::to_value(&config.youtube_filter_option)?,
+                        )
                         .await
                 }
                 // 处理弹幕相关字段

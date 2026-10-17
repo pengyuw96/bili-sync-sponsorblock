@@ -243,6 +243,19 @@ export type AudioQuality =
 	| 'Quality192k';
 
 export type VideoCodec = 'AVC' | 'HEV' | 'AV1';
+export type YoutubeVideoCodec = 'HEVC' | 'AV1' | 'VP9' | 'AVC';
+export interface YoutubeFilterOptionConfig {
+	video_max_height: number;
+	video_min_height: number;
+	codecs: YoutubeVideoCodec[];
+	audio_max_bitrate: number;
+	audio_min_bitrate: number;
+	no_dolby_video: boolean;
+	no_dolby_audio: boolean;
+	no_hdr: boolean;
+	no_hires: boolean;
+}
+
 
 export interface FilterOption {
 	video_max_quality: VideoQuality;
@@ -580,6 +593,7 @@ export interface ConfigResponse {
 	no_dolby_audio?: boolean;
 	no_hdr?: boolean;
 	no_hires?: boolean;
+	youtube_filter_option?: YoutubeFilterOptionConfig;
 	// 新增弹幕设置
 	danmaku_duration?: number;
 	danmaku_font?: string;
@@ -823,6 +837,15 @@ export interface UpdateConfigRequest {
 	no_dolby_audio?: boolean;
 	no_hdr?: boolean;
 	no_hires?: boolean;
+	youtube_video_max_height?: number;
+	youtube_video_min_height?: number;
+	youtube_codecs?: string[];
+	youtube_audio_max_bitrate?: number;
+	youtube_audio_min_bitrate?: number;
+	youtube_no_dolby_video?: boolean;
+	youtube_no_dolby_audio?: boolean;
+	youtube_no_hdr?: boolean;
+	youtube_no_hires?: boolean;
 	// 新增弹幕设置
 	danmaku_duration?: number;
 	danmaku_font?: string;

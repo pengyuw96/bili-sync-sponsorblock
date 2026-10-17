@@ -169,6 +169,9 @@ pub struct Config {
     pub credential: ArcSwapOption<Credential>,
     #[serde(default)]
     pub filter_option: FilterOption,
+    /// YouTube-native stream filter (heights + HEVC/AV1/VP9/AVC). Separate from Bilibili filter_option.
+    #[serde(default)]
+    pub youtube_filter_option: YoutubeFilterOption,
     #[serde(default)]
     pub danmaku_option: DanmakuOption,
     #[serde(default)]
@@ -561,6 +564,156 @@ impl NotificationConfig {
 }
 
 
+/// YouTube 视频编码偏好（平台原生标签，含 VP9）。
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    strum::Display,
+    strum::EnumString,
+    utoipa::ToSchema,
+)]
+#[strum(serialize_all = "UPPERCASE")]
+pub enum YoutubeVideoCodec {
+    /// H.265 / HEVC
+    HEVC,
+    AV1,
+    VP9,
+    /// H.264 / AVC
+    AVC,
+}
+
+/// YouTube 画质与编码过滤（与 B 站 FilterOption 完全分离）。
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct YoutubeFilterOption {
+    /// 最高分辨率短边像素：4320 / 2160 / 1440 / 1080 / 720 / 480 / 360
+    #[serde(default = "default_youtube_video_max_height")]
+    pub video_max_height: i32,
+    /// 最低分辨率短边像素
+    #[serde(default = "default_youtube_video_min_height")]
+    pub video_min_height: i32,
+    /// 编码优先级（靠前优先）。默认 HEVC 优先。
+    #[serde(default = "default_youtube_codecs")]
+    pub codecs: Vec<YoutubeVideoCodec>,
+    /// 音频最高码率（kbps）；极大值表示不限制
+    #[serde(default = "default_youtube_audio_max_bitrate")]
+    pub audio_max_bitrate: i32,
+    /// 音频最低码率（kbps）
+    #[serde(default = "default_youtube_audio_min_bitrate")]
+    pub audio_min_bitrate: i32,
+    #[serde(default)]
+    pub no_dolby_video: bool,
+    #[serde(default)]
+    pub no_dolby_audio: bool,
+    #[serde(default)]
+    pub no_hdr: bool,
+    #[serde(default)]
+    pub no_hires: bool,
+}
+
+fn default_youtube_video_max_height() -> i32 {
+    4320
+}
+fn default_youtube_video_min_height() -> i32 {
+    360
+}
+fn default_youtube_codecs() -> Vec<YoutubeVideoCodec> {
+    vec![
+        YoutubeVideoCodec::HEVC,
+        YoutubeVideoCodec::AV1,
+        YoutubeVideoCodec::VP9,
+        YoutubeVideoCodec::AVC,
+    ]
+}
+fn default_youtube_audio_max_bitrate() -> i32 {
+    i32::MAX
+}
+fn default_youtube_audio_min_bitrate() -> i32 {
+    0
+}
+
+impl Default for YoutubeFilterOption {
+    fn default() -> Self {
+        Self {
+            video_max_height: default_youtube_video_max_height(),
+            video_min_height: default_youtube_video_min_height(),
+            codecs: default_youtube_codecs(),
+            audio_max_bitrate: default_youtube_audio_max_bitrate(),
+            audio_min_bitrate: default_youtube_audio_min_bitrate(),
+            no_dolby_video: false,
+            no_dolby_audio: false,
+            no_hdr: false,
+            no_hires: false,
+        }
+    }
+}
+
+impl YoutubeFilterOption {
+    /// 从 B 站 FilterOption 映射（抖音/TikTok 或油管源级覆盖时使用）。
+    pub fn from_bili_filter(filter: &FilterOption) -> Self {
+        use crate::bilibili::{AudioQuality, VideoCodecs, VideoQuality};
+        let height = |q: VideoQuality| -> i32 {
+            match q {
+                VideoQuality::Quality360p => 360,
+                VideoQuality::Quality480p => 480,
+                VideoQuality::Quality720p => 720,
+                VideoQuality::Quality1080p
+                | VideoQuality::Quality1080pPLUS
+                | VideoQuality::Quality1080p60 => 1080,
+                VideoQuality::Quality4k | VideoQuality::QualityHdr | VideoQuality::QualityDolby => 2160,
+                VideoQuality::Quality8k => 4320,
+            }
+        };
+        let audio_min = |q: AudioQuality| -> i32 {
+            match q {
+                AudioQuality::Quality64k => 0,
+                AudioQuality::Quality132k => 81,
+                AudioQuality::Quality192k => 161,
+                AudioQuality::QualityDolby
+                | AudioQuality::QualityDolbyBangumi
+                | AudioQuality::QualityHiRES => 257,
+            }
+        };
+        let audio_max = |q: AudioQuality| -> i32 {
+            match q {
+                AudioQuality::Quality64k => 80,
+                AudioQuality::Quality132k => 160,
+                AudioQuality::Quality192k => 256,
+                AudioQuality::QualityDolby | AudioQuality::QualityDolbyBangumi => 640,
+                AudioQuality::QualityHiRES => i32::MAX,
+            }
+        };
+        let codecs = filter
+            .codecs
+            .iter()
+            .filter_map(|c| match c {
+                VideoCodecs::HEV => Some(YoutubeVideoCodec::HEVC),
+                VideoCodecs::AV1 => Some(YoutubeVideoCodec::AV1),
+                VideoCodecs::AVC => Some(YoutubeVideoCodec::AVC),
+            })
+            .collect::<Vec<_>>();
+        Self {
+            video_max_height: height(filter.video_max_quality),
+            video_min_height: height(filter.video_min_quality),
+            codecs: if codecs.is_empty() {
+                default_youtube_codecs()
+            } else {
+                codecs
+            },
+            audio_max_bitrate: audio_max(filter.audio_max_quality),
+            audio_min_bitrate: audio_min(filter.audio_min_quality),
+            no_dolby_video: filter.no_dolby_video,
+            no_dolby_audio: filter.no_dolby_audio,
+            no_hdr: filter.no_hdr,
+            no_hires: filter.no_hires,
+        }
+    }
+}
+
 /// BilibiliSponsorBlock 裁剪配置（本地审计扩展，非上游正式发布字段）。
 ///
 /// API: https://github.com/hanydd/BilibiliSponsorBlock/wiki/API
@@ -901,6 +1054,7 @@ impl Clone for Config {
                 no_hdr: self.filter_option.no_hdr,
                 no_hires: self.filter_option.no_hires,
             },
+            youtube_filter_option: self.youtube_filter_option.clone(),
             danmaku_option: DanmakuOption {
                 duration: self.danmaku_option.duration,
                 font: self.danmaku_option.font.clone(),
@@ -971,6 +1125,7 @@ impl Default for Config {
             bind_address: default_bind_address(),
             credential: ArcSwapOption::from(Some(Arc::new(Credential::default()))),
             filter_option: FilterOption::default(),
+            youtube_filter_option: YoutubeFilterOption::default(),
             danmaku_option: DanmakuOption::default(),
             danmaku_update_policy: DanmakuUpdatePolicy::default(),
             video_name: Cow::Borrowed("{{upper_name}}/{{title}}"),

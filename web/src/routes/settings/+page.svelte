@@ -75,9 +75,15 @@
 		},
 		{
 			id: 'quality',
-			title: '视频质量',
-			description: '设置视频/音频质量、编解码器等参数',
+			title: '视频质量（B站）',
+			description: 'B 站视频/音频质量、编解码器（AVC/HEV/AV1）',
 			icon: VideoIcon
+		},
+		{
+			id: 'youtube_quality',
+			title: '视频质量（YouTube）',
+			description: 'YouTube 分辨率与编码（默认 HEVC 优先，含 VP9/AV1/AVC）',
+			icon: YoutubeIcon
 		},
 		{
 			id: 'download',
@@ -179,7 +185,8 @@
 
 	const settingTooltips = {
 		naming: '调整视频、分页、番剧等文件命名规则，以及目录结构和媒体库兼容方式。',
-		quality: '限制视频与音频清晰度、编码格式和优先选择范围。',
+		quality: 'B 站视频/音频质量与编码偏好。',
+		youtube_quality: 'YouTube 分辨率与编码偏好（与 B 站分离；默认 HEVC 优先）。',
 		download: '控制下载并发、速率限制、任务执行方式和下载器行为。',
 		danmaku: '配置弹幕文件的显示样式、布局参数和同步策略。',
 		credential: '填写 B 站登录凭证，影响会员画质、互动内容和受限接口访问。',
@@ -211,6 +218,9 @@
 		bindAddress: '0.0.0.0:12345',
 		parallelDownloadThreads: 4,
 		codecs: ['AVC', 'HEV', 'AV1'],
+		youtubeCodecs: ['HEVC', 'AV1', 'VP9', 'AVC'],
+		youtubeVideoMaxHeight: 4320,
+		youtubeVideoMinHeight: 360,
 		danmakuDuration: 15.0,
 		danmakuFontSize: 25,
 		danmakuWidthRatio: 1.2,
@@ -295,7 +305,7 @@
 	let parallelDownloadThreads = 4;
 	let parallelDownloadUseAria2 = false;
 
-	// 视频质量设置
+	// 视频质量设置（B站）
 	let videoMaxQuality = 'Quality8k';
 	let videoMinQuality = 'Quality360p';
 	let audioMaxQuality = 'QualityHiRES';
@@ -305,6 +315,16 @@
 	let noDolbyAudio = false;
 	let noHdr = false;
 	let noHires = false;
+
+	// YouTube 画质（独立）
+	let youtubeVideoMaxHeight = 4320;
+	let youtubeVideoMinHeight = 360;
+	let youtubeCodecs = ['HEVC', 'AV1', 'VP9', 'AVC'];
+	let youtubeNoDolbyVideo = false;
+	let youtubeNoDolbyAudio = false;
+	let youtubeNoHdr = false;
+	let youtubeNoHires = false;
+	let youtubeDragIndex: number | null = null;
 
 	// 弹幕设置
 	let danmakuDuration = 15.0;
@@ -719,6 +739,42 @@
 		{ value: 'AV1', label: 'AV1' }
 	];
 
+	const youtubeHeightOptions = [
+		{ value: 4320, label: '4320p (8K)' },
+		{ value: 2160, label: '2160p (4K)' },
+		{ value: 1440, label: '1440p' },
+		{ value: 1080, label: '1080p' },
+		{ value: 720, label: '720p' },
+		{ value: 480, label: '480p' },
+		{ value: 360, label: '360p' }
+	];
+	const youtubeCodecOptions = [
+		{ value: 'HEVC', label: 'HEVC / H.265' },
+		{ value: 'AV1', label: 'AV1' },
+		{ value: 'VP9', label: 'VP9' },
+		{ value: 'AVC', label: 'AVC / H.264' }
+	];
+
+	function handleYoutubeDragStart(_e: DragEvent, index: number) {
+		youtubeDragIndex = index;
+	}
+	function handleYoutubeDragOver(e: DragEvent) {
+		e.preventDefault();
+	}
+	function handleYoutubeDrop(e: DragEvent, index: number) {
+		e.preventDefault();
+		if (youtubeDragIndex === null || youtubeDragIndex === index) return;
+		const next = [...youtubeCodecs];
+		const [item] = next.splice(youtubeDragIndex, 1);
+		next.splice(index, 0, item);
+		youtubeCodecs = next;
+		youtubeDragIndex = null;
+	}
+	function removeYoutubeCodec(index: number) {
+		youtubeCodecs = youtubeCodecs.filter((_, i) => i !== index);
+	}
+
+
 	// 响应式相关
 	const isMobileQuery = new IsMobile();
 	const isTabletQuery = new IsTablet();
@@ -805,7 +861,7 @@
 		parallelDownloadThreads = config.parallel_download_threads || 4;
 		parallelDownloadUseAria2 = config.parallel_download_use_aria2 ?? false;
 
-		// 视频质量设置
+		// 视频质量设置（B站）
 		videoMaxQuality = config.video_max_quality || 'Quality8k';
 		videoMinQuality = config.video_min_quality || 'Quality360p';
 		audioMaxQuality = config.audio_max_quality || 'QualityHiRES';
@@ -815,6 +871,18 @@
 		noDolbyAudio = config.no_dolby_audio || false;
 		noHdr = config.no_hdr || false;
 		noHires = config.no_hires || false;
+
+		const ytq = config.youtube_filter_option;
+		youtubeVideoMaxHeight = ytq?.video_max_height ?? DEFAULT_CONFIG_VALUES.youtubeVideoMaxHeight;
+		youtubeVideoMinHeight = ytq?.video_min_height ?? DEFAULT_CONFIG_VALUES.youtubeVideoMinHeight;
+		youtubeCodecs =
+			Array.isArray(ytq?.codecs) && ytq.codecs.length > 0
+				? [...ytq.codecs]
+				: [...DEFAULT_CONFIG_VALUES.youtubeCodecs];
+		youtubeNoDolbyVideo = ytq?.no_dolby_video ?? false;
+		youtubeNoDolbyAudio = ytq?.no_dolby_audio ?? false;
+		youtubeNoHdr = ytq?.no_hdr ?? false;
+		youtubeNoHires = ytq?.no_hires ?? false;
 
 		// 弹幕设置
 		danmakuDuration = config.danmaku_duration || 15.0;
@@ -1423,6 +1491,14 @@
 			no_dolby_audio: noDolbyAudio,
 			no_hdr: noHdr,
 			no_hires: noHires,
+			youtube_video_max_height: youtubeVideoMaxHeight,
+			youtube_video_min_height: youtubeVideoMinHeight,
+			youtube_codecs:
+				youtubeCodecs.length > 0 ? youtubeCodecs : [...DEFAULT_CONFIG_VALUES.youtubeCodecs],
+			youtube_no_dolby_video: youtubeNoDolbyVideo,
+			youtube_no_dolby_audio: youtubeNoDolbyAudio,
+			youtube_no_hdr: youtubeNoHdr,
+			youtube_no_hires: youtubeNoHires,
 			// 弹幕设置
 			danmaku_duration: normalizeNumberInput(
 				danmakuDuration,
@@ -2640,8 +2716,8 @@
 	onOpenChange={(open) => {
 		if (!open) openSheet = null;
 	}}
-	title="视频质量设置"
-	description="设置视频/音频质量、编解码器等参数"
+	title="视频质量（B站）"
+	description="B 站视频/音频质量与编解码器（不影响 YouTube）"
 	titleTooltip={getSettingTooltip('quality')}
 	{isMobile}
 >
@@ -2838,6 +2914,178 @@
 		<SheetFooter class={isMobile ? 'pb-safe border-t px-4 pt-3' : 'pb-safe border-t pt-4'}>
 			<Button type="submit" disabled={saving} class="w-full">
 				{saving ? '保存中...' : '保存设置'}
+			</Button>
+		</SheetFooter>
+	</form>
+
+</ResponsiveSheet>
+
+<!-- YouTube 视频质量设置抽屉 -->
+<ResponsiveSheet
+	open={openSheet === 'youtube_quality'}
+	onOpenChange={(open) => {
+		if (!open) openSheet = null;
+	}}
+	title="视频质量（YouTube）"
+	description="分辨率与编码偏好独立于 B 站；默认优先 HEVC/H.265"
+	titleTooltip={getSettingTooltip('youtube_quality')}
+	{isMobile}
+>
+	<form
+		onsubmit={(e) => {
+			e.preventDefault();
+			saveConfig();
+		}}
+		class="flex flex-col {isMobile ? 'h-[calc(90vh-8rem)]' : 'h-[calc(100vh-12rem)]'}"
+	>
+		<div class="flex-1 space-y-6 overflow-y-auto {isMobile ? 'px-4 py-4' : 'px-6 py-6'}">
+			<div class="grid grid-cols-1 gap-4 {isMobile ? 'sm:grid-cols-1' : 'md:grid-cols-2'}">
+				<div class="space-y-2">
+					<Label for="yt-video-max-height">最高分辨率</Label>
+					<CustomSelect
+						id="yt-video-max-height"
+						value={youtubeVideoMaxHeight}
+						options={youtubeHeightOptions}
+						onChange={(nextValue) =>
+							(youtubeVideoMaxHeight = Number(nextValue ?? DEFAULT_CONFIG_VALUES.youtubeVideoMaxHeight))
+						}
+						class="border-input bg-background ring-offset-background focus-visible:ring-ring flex h-10 w-full rounded-md border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
+					/>
+				</div>
+				<div class="space-y-2">
+					<Label for="yt-video-min-height">最低分辨率</Label>
+					<CustomSelect
+						id="yt-video-min-height"
+						value={youtubeVideoMinHeight}
+						options={youtubeHeightOptions}
+						onChange={(nextValue) =>
+							(youtubeVideoMinHeight = Number(nextValue ?? DEFAULT_CONFIG_VALUES.youtubeVideoMinHeight))
+						}
+						class="border-input bg-background ring-offset-background focus-visible:ring-ring flex h-10 w-full rounded-md border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
+					/>
+				</div>
+			</div>
+
+			<div class="space-y-2">
+				<Label>编码优先级顺序</Label>
+				<p class="text-muted-foreground mb-3 text-sm">
+					越靠前优先级越高。YouTube 常见编码：HEVC 体积小，VP9 在 1440p/4K 很常见，AVC 兼容最好。
+				</p>
+				<div
+					class="mb-3 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-950/20"
+				>
+					<div class="space-y-2 text-xs text-blue-700 dark:text-blue-300">
+						<div><strong>🚀 HEVC (H.265)：</strong>默认优先，体积更小，适合 Emby/核显硬解</div>
+						<div><strong>⚡ AV1：</strong>压缩率高，新设备更友好</div>
+						<div><strong>🟣 VP9：</strong>YouTube 高分辨率常见编码；偏好列表可显式保留</div>
+						<div><strong>🎯 AVC (H.264)：</strong>兼容性最好，文件更大</div>
+					</div>
+				</div>
+				<div class="space-y-2">
+					{#each youtubeCodecs as codec, index (codec)}
+						<div
+							class="flex cursor-move items-center gap-3 rounded-lg border bg-gray-50 p-3 dark:bg-gray-900"
+							draggable="true"
+							ondragstart={(e) => handleYoutubeDragStart(e, index)}
+							ondragover={handleYoutubeDragOver}
+							ondrop={(e) => handleYoutubeDrop(e, index)}
+							role="button"
+							tabindex="0"
+						>
+							<div class="flex flex-1 items-center gap-2">
+								<span
+									class="bg-primary text-primary-foreground flex h-6 w-6 items-center justify-center rounded-full text-sm font-medium"
+								>
+									{index + 1}
+								</span>
+								<span class="font-medium">
+									{youtubeCodecOptions.find((option) => option.value === codec)?.label || codec}
+								</span>
+							</div>
+							<button
+								type="button"
+								class="p-1 text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+								onclick={() => removeYoutubeCodec(index)}
+								title="移除此编解码器"
+								aria-label="移除此编解码器"
+							>
+								<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M6 18L18 6M6 6l12 12"
+									/>
+								</svg>
+							</button>
+						</div>
+					{/each}
+
+					{#if youtubeCodecs.length < youtubeCodecOptions.length}
+						<div class="mt-2">
+							<CustomSelect
+								class="w-full rounded-md border p-2 text-sm"
+								value={null}
+								options={youtubeCodecOptions
+									.filter((option) => !youtubeCodecs.includes(option.value))
+									.map((option) => ({ value: option.value, label: option.label }))}
+								placeholder="添加编解码器..."
+								clearAfterSelect
+								onChange={(nextValue) => {
+									const codec = String(nextValue ?? '');
+									if (codec && !youtubeCodecs.includes(codec)) {
+										youtubeCodecs = [...youtubeCodecs, codec];
+									}
+								}}
+							/>
+						</div>
+					{/if}
+				</div>
+			</div>
+
+			<div class="grid grid-cols-1 gap-4 {isMobile ? 'sm:grid-cols-1' : 'md:grid-cols-2'}">
+				<div class="flex items-center space-x-2">
+					<input
+						type="checkbox"
+						id="yt-no-dolby-video"
+						bind:checked={youtubeNoDolbyVideo}
+						class="text-primary focus:ring-primary h-4 w-4 rounded border-gray-300"
+					/>
+					<Label for="yt-no-dolby-video" class="text-sm">禁用杜比视界</Label>
+				</div>
+				<div class="flex items-center space-x-2">
+					<input
+						type="checkbox"
+						id="yt-no-dolby-audio"
+						bind:checked={youtubeNoDolbyAudio}
+						class="text-primary focus:ring-primary h-4 w-4 rounded border-gray-300"
+					/>
+					<Label for="yt-no-dolby-audio" class="text-sm">禁用杜比音频</Label>
+				</div>
+				<div class="flex items-center space-x-2">
+					<input
+						type="checkbox"
+						id="yt-no-hdr"
+						bind:checked={youtubeNoHdr}
+						class="text-primary focus:ring-primary h-4 w-4 rounded border-gray-300"
+					/>
+					<Label for="yt-no-hdr" class="text-sm">禁用 HDR</Label>
+				</div>
+				<div class="flex items-center space-x-2">
+					<input
+						type="checkbox"
+						id="yt-no-hires"
+						bind:checked={youtubeNoHires}
+						class="text-primary focus:ring-primary h-4 w-4 rounded border-gray-300"
+					/>
+					<Label for="yt-no-hires" class="text-sm">禁用 Hi-Res 音频</Label>
+				</div>
+			</div>
+		</div>
+
+		<SheetFooter class="border-t {isMobile ? 'px-4 py-4' : 'px-6 py-4'}">
+			<Button type="submit" class="w-full" disabled={saving}>
+				{saving ? '保存中...' : '保存配置'}
 			</Button>
 		</SheetFooter>
 	</form>

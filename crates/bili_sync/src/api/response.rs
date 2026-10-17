@@ -589,6 +589,8 @@ pub struct ConfigResponse {
     pub no_dolby_audio: bool,
     pub no_hdr: bool,
     pub no_hires: bool,
+    /// YouTube 画质与编码（独立于上方 B 站字段）
+    pub youtube_filter_option: YoutubeFilterOptionResponse,
     // 弹幕设置
     pub danmaku_duration: f64,
     pub danmaku_font: String,
@@ -1344,6 +1346,19 @@ pub struct AiRenameConfigResponse {
     pub video_prompt_hint: String,
     pub audio_prompt_hint: String,
     pub rename_parent_dir: bool,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct YoutubeFilterOptionResponse {
+    pub video_max_height: i32,
+    pub video_min_height: i32,
+    pub codecs: Vec<String>,
+    pub audio_max_bitrate: i32,
+    pub audio_min_bitrate: i32,
+    pub no_dolby_video: bool,
+    pub no_dolby_audio: bool,
+    pub no_hdr: bool,
+    pub no_hires: bool,
 }
 
 // SponsorBlock 裁剪配置响应（本地审计扩展）

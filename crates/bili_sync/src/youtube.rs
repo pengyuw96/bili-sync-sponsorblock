@@ -36,8 +36,9 @@ use crate::api::{
     },
 };
 use crate::bilibili::{
-    AudioQuality, DanmakuElem, DanmakuWriter, FilterOption, PageInfo as BiliPageInfo, VideoCodecs, VideoQuality,
+    DanmakuElem, DanmakuWriter, FilterOption, PageInfo as BiliPageInfo,
 };
+use crate::config::{YoutubeFilterOption, YoutubeVideoCodec};
 use crate::config::CONFIG_DIR;
 use crate::external_media::{ExternalMediaFormat, ExternalMediaMetadata, ExternalSubtitle};
 use crate::task::TASK_CONTROLLER;
@@ -4464,16 +4465,10 @@ async fn download_youtube_media(
         // 大小就把任务标记为完成。
         remove_file_if_exists(&output_path).await?;
     }
-    let filter_option = source
-        .filter_option
-        .as_ref()
-        .map(|value| serde_json::from_value::<FilterOption>(value.clone()))
-        .transpose()
-        .with_context(|| format!("{platform}视频源级流过滤设置无效"))?
-        .unwrap_or_else(|| crate::config::reload_config().filter_option);
+    let (bili_filter_option, stream_filter) = resolve_external_stream_filters(source)?;
     let selected = if !metadata.is_slideshow() {
-        let selected = select_youtube_streams(&metadata.formats, &filter_option, source.audio_only, platform)?;
-        log_selected_youtube_streams(&selected, &filter_option, source, &title);
+        let selected = select_youtube_streams(&metadata.formats, &stream_filter, source.audio_only, platform)?;
+        log_selected_youtube_streams(&selected, &stream_filter, source, &title);
         Some(selected)
     } else {
         None
@@ -4482,7 +4477,7 @@ async fn download_youtube_media(
     // 未达到设定的最低分辨率时主动跳过下载，不产生失败/错误任务。
     if !media_exists && metadata.is_slideshow() && !source.audio_only {
         if let Some(selected) = selected.as_ref() {
-            let min_height = youtube_quality_height(filter_option.video_min_quality);
+            let min_height = stream_filter.video_min_height;
             if let Some(actual_height) = selected_effective_video_height(selected) {
                 if actual_height > 0 && actual_height < min_height {
                     warn!(
@@ -4535,7 +4530,7 @@ async fn download_youtube_media(
             downloader,
             &metadata,
             &output_path,
-            &filter_option,
+            &bili_filter_option,
             source,
         )
         .await?;
@@ -5121,9 +5116,43 @@ fn is_youtube_auth_required_error(error: &anyhow::Error) -> bool {
 
 /// 在格式列表中选择最佳独立视频流（视频/音频分离时使用）。
 /// `allow_vp9` 为 true 时允许 VP9 编码作为最高画质兜底。
+
+/// Resolve Bilibili-shaped source override + YouTube-native stream filter.
+/// YouTube uses `youtube_filter_option` by default; Douyin/TikTok map from Bilibili `filter_option`.
+fn resolve_external_stream_filters(
+    source: &youtube_source::Model,
+) -> Result<(FilterOption, YoutubeFilterOption)> {
+    let config = crate::config::reload_config();
+    let bili = source
+        .filter_option
+        .as_ref()
+        .map(|value| serde_json::from_value::<FilterOption>(value.clone()))
+        .transpose()
+        .with_context(|| format!("{}视频源级流过滤设置无效", source_platform_label(source)))?
+        .unwrap_or_else(|| config.filter_option.clone());
+
+    let stream = if let Some(value) = source.filter_option.as_ref() {
+        // Per-source override is still stored as Bilibili FilterOption JSON.
+        serde_json::from_value::<FilterOption>(value.clone())
+            .map(|f| YoutubeFilterOption::from_bili_filter(&f))
+            .unwrap_or_else(|_| {
+                if is_douyin_source(source) || crate::tiktok::is_tiktok_source(source) {
+                    YoutubeFilterOption::from_bili_filter(&bili)
+                } else {
+                    config.youtube_filter_option.clone()
+                }
+            })
+    } else if is_douyin_source(source) || crate::tiktok::is_tiktok_source(source) {
+        YoutubeFilterOption::from_bili_filter(&bili)
+    } else {
+        config.youtube_filter_option.clone()
+    };
+    Ok((bili, stream))
+}
+
 fn select_best_youtube_video_stream(
     formats: &[ExternalMediaFormat],
-    filter: &FilterOption,
+    filter: &YoutubeFilterOption,
     min_height: i32,
     max_height: i32,
     allow_vp9: bool,
@@ -5159,7 +5188,7 @@ fn select_best_youtube_video_stream(
 /// 在格式列表中选择最佳混合流（音视频一体时使用），同样支持 VP9 兜底。
 fn select_best_youtube_mixed_stream(
     formats: &[ExternalMediaFormat],
-    filter: &FilterOption,
+    filter: &YoutubeFilterOption,
     min_height: i32,
     max_height: i32,
     min_audio_bitrate: i32,
@@ -5235,12 +5264,12 @@ fn upgrade_with_vp9_fallback(
 
 fn select_youtube_streams(
     formats: &[ExternalMediaFormat],
-    filter: &FilterOption,
+    filter: &YoutubeFilterOption,
     audio_only: bool,
     platform: &str,
 ) -> Result<SelectedStreams> {
-    let min_audio_bitrate = youtube_audio_min_bitrate(filter.audio_min_quality);
-    let max_audio_bitrate = youtube_audio_max_bitrate(filter.audio_max_quality);
+    let min_audio_bitrate = filter.audio_min_bitrate;
+    let max_audio_bitrate = filter.audio_max_bitrate;
     let audio = formats
         .iter()
         .filter(|format| {
@@ -5258,8 +5287,8 @@ fn select_youtube_streams(
             )
         })
         .cloned();
-    let min_height = youtube_quality_height(filter.video_min_quality);
-    let max_height = youtube_quality_height(filter.video_max_quality);
+    let min_height = filter.video_min_height;
+    let max_height = filter.video_max_height;
     if audio_only {
         let strict_mixed = select_best_youtube_mixed_stream(
             formats,
@@ -5345,12 +5374,12 @@ fn selected_effective_video_height(selected: &SelectedStreams) -> Option<i32> {
 }
 
 /// 编码是否命中用户的编码偏好列表。
-fn youtube_codec_allowed(codec: Option<&str>, filter: &FilterOption) -> bool {
+fn youtube_codec_allowed(codec: Option<&str>, filter: &YoutubeFilterOption) -> bool {
     youtube_codec(codec).is_some_and(|codec| filter.codecs.contains(&codec))
 }
 
 /// 格式的 HDR/Dolby 元数据过滤（与编码偏好无关）。
-fn youtube_video_metadata_allowed(format: &ExternalMediaFormat, filter: &FilterOption) -> bool {
+fn youtube_video_metadata_allowed(format: &ExternalMediaFormat, filter: &YoutubeFilterOption) -> bool {
     let dynamic_range = format.dynamic_range.as_deref().unwrap_or("SDR").to_ascii_uppercase();
     if filter.no_hdr && dynamic_range != "SDR" {
         return false;
@@ -5361,7 +5390,7 @@ fn youtube_video_metadata_allowed(format: &ExternalMediaFormat, filter: &FilterO
     true
 }
 
-fn youtube_video_allowed(format: &ExternalMediaFormat, filter: &FilterOption) -> bool {
+fn youtube_video_allowed(format: &ExternalMediaFormat, filter: &YoutubeFilterOption) -> bool {
     youtube_codec_allowed(format.vcodec.as_deref(), filter) && youtube_video_metadata_allowed(format, filter)
 }
 
@@ -5372,12 +5401,12 @@ fn is_youtube_vp9(codec: Option<&str>) -> bool {
 }
 
 /// 编码偏好 + VP9 兜底：命中偏好列表，或为 VP9（仅在偏好编码无法达到更高分辨率时使用）。
-fn youtube_video_allowed_with_vp9_fallback(format: &ExternalMediaFormat, filter: &FilterOption) -> bool {
+fn youtube_video_allowed_with_vp9_fallback(format: &ExternalMediaFormat, filter: &YoutubeFilterOption) -> bool {
     (youtube_codec_allowed(format.vcodec.as_deref(), filter) || is_youtube_vp9(format.vcodec.as_deref()))
         && youtube_video_metadata_allowed(format, filter)
 }
 
-fn youtube_audio_allowed(format: &ExternalMediaFormat, filter: &FilterOption) -> bool {
+fn youtube_audio_allowed(format: &ExternalMediaFormat, filter: &YoutubeFilterOption) -> bool {
     let codec = format.acodec.as_deref().unwrap_or_default().to_ascii_lowercase();
     if filter.no_dolby_audio && (codec.contains("ac-3") || codec.contains("ec-3") || codec.contains("dolby")) {
         return false;
@@ -5389,28 +5418,9 @@ fn youtube_audio_bitrate(format: &ExternalMediaFormat) -> i32 {
     format.abr.or(format.tbr).unwrap_or_default().round() as i32
 }
 
-fn youtube_audio_min_bitrate(quality: AudioQuality) -> i32 {
-    match quality {
-        AudioQuality::Quality64k => 0,
-        AudioQuality::Quality132k => 81,
-        AudioQuality::Quality192k => 161,
-        AudioQuality::QualityDolby | AudioQuality::QualityDolbyBangumi | AudioQuality::QualityHiRES => 257,
-    }
-}
-
-fn youtube_audio_max_bitrate(quality: AudioQuality) -> i32 {
-    match quality {
-        AudioQuality::Quality64k => 80,
-        AudioQuality::Quality132k => 160,
-        AudioQuality::Quality192k => 256,
-        AudioQuality::QualityDolby | AudioQuality::QualityDolbyBangumi => 640,
-        AudioQuality::QualityHiRES => i32::MAX,
-    }
-}
-
 fn log_selected_youtube_streams(
     selected: &SelectedStreams,
-    filter: &FilterOption,
+    filter: &YoutubeFilterOption,
     source: &youtube_source::Model,
     title: &str,
 ) {
@@ -5431,10 +5441,10 @@ fn log_selected_youtube_streams(
     };
     info!(
         platform,
-        video_min = ?filter.video_min_quality,
-        video_max = ?filter.video_max_quality,
-        audio_min = ?filter.audio_min_quality,
-        audio_max = ?filter.audio_max_quality,
+        video_min_height = filter.video_min_height,
+        video_max_height = filter.video_max_height,
+        audio_min_bitrate = filter.audio_min_bitrate,
+        audio_max_bitrate = filter.audio_max_bitrate,
         codecs = ?filter.codecs,
         video = selected.video.as_ref().map(&describe),
         audio = selected.audio.as_ref().map(&describe),
@@ -6638,31 +6648,22 @@ fn parse_youtube_upload_date(value: &str) -> Option<chrono::NaiveDateTime> {
         .and_then(|date| date.and_hms_opt(0, 0, 0))
 }
 
-fn youtube_quality_height(quality: VideoQuality) -> i32 {
-    match quality {
-        VideoQuality::Quality360p => 360,
-        VideoQuality::Quality480p => 480,
-        VideoQuality::Quality720p => 720,
-        VideoQuality::Quality1080p | VideoQuality::Quality1080pPLUS | VideoQuality::Quality1080p60 => 1080,
-        VideoQuality::Quality4k | VideoQuality::QualityHdr | VideoQuality::QualityDolby => 2160,
-        VideoQuality::Quality8k => 4320,
-    }
-}
-
-fn youtube_codec_rank(codec: Option<&str>, preferences: &[VideoCodecs]) -> usize {
+fn youtube_codec_rank(codec: Option<&str>, preferences: &[YoutubeVideoCodec]) -> usize {
     youtube_codec(codec)
         .and_then(|codec| preferences.iter().position(|preference| *preference == codec))
         .unwrap_or(preferences.len())
 }
 
-fn youtube_codec(codec: Option<&str>) -> Option<VideoCodecs> {
+fn youtube_codec(codec: Option<&str>) -> Option<YoutubeVideoCodec> {
     let codec = codec.unwrap_or_default().to_ascii_lowercase();
     if codec.starts_with("avc") || codec.starts_with("h264") {
-        Some(VideoCodecs::AVC)
+        Some(YoutubeVideoCodec::AVC)
     } else if codec.starts_with("hev") || codec.starts_with("hvc") || codec.starts_with("h265") {
-        Some(VideoCodecs::HEV)
+        Some(YoutubeVideoCodec::HEVC)
     } else if codec.starts_with("av01") || codec.starts_with("av1") {
-        Some(VideoCodecs::AV1)
+        Some(YoutubeVideoCodec::AV1)
+    } else if codec.starts_with("vp9") || codec.starts_with("vp09") {
+        Some(YoutubeVideoCodec::VP9)
     } else {
         None
     }
@@ -8304,15 +8305,15 @@ mod tests {
 
     #[test]
     fn youtube_stream_selection_falls_back_to_vp9_for_highest_quality() {
-        use crate::bilibili::{AudioQuality, FilterOption, VideoCodecs, VideoQuality};
+        use crate::config::{YoutubeFilterOption, YoutubeVideoCodec};
         use super::ExternalMediaFormat;
 
-        let filter = FilterOption {
-            video_max_quality: VideoQuality::Quality8k,
-            video_min_quality: VideoQuality::Quality720p,
-            audio_max_quality: AudioQuality::QualityHiRES,
-            audio_min_quality: AudioQuality::Quality64k,
-            codecs: vec![VideoCodecs::AV1, VideoCodecs::AVC, VideoCodecs::HEV],
+        let filter = YoutubeFilterOption {
+            video_max_height: 4320,
+            video_min_height: 720,
+            audio_max_bitrate: i32::MAX,
+            audio_min_bitrate: 0,
+            codecs: vec![YoutubeVideoCodec::AV1, YoutubeVideoCodec::AVC, YoutubeVideoCodec::HEVC],
             ..Default::default()
         };
         let vfmt = |id: &str, h: i32, vcodec: &str| ExternalMediaFormat {
@@ -8368,15 +8369,15 @@ mod tests {
 
     #[test]
     fn youtube_stream_selection_prefers_allowed_codec_at_same_height() {
-        use crate::bilibili::{AudioQuality, FilterOption, VideoCodecs, VideoQuality};
+        use crate::config::{YoutubeFilterOption, YoutubeVideoCodec};
         use super::ExternalMediaFormat;
 
-        let filter = FilterOption {
-            video_max_quality: VideoQuality::Quality8k,
-            video_min_quality: VideoQuality::Quality720p,
-            audio_max_quality: AudioQuality::QualityHiRES,
-            audio_min_quality: AudioQuality::Quality64k,
-            codecs: vec![VideoCodecs::AV1, VideoCodecs::AVC, VideoCodecs::HEV],
+        let filter = YoutubeFilterOption {
+            video_max_height: 4320,
+            video_min_height: 720,
+            audio_max_bitrate: i32::MAX,
+            audio_min_bitrate: 0,
+            codecs: vec![YoutubeVideoCodec::AV1, YoutubeVideoCodec::AVC, YoutubeVideoCodec::HEVC],
             ..Default::default()
         };
         let vfmt = |id: &str, h: i32, vcodec: &str| ExternalMediaFormat {
@@ -8433,7 +8434,7 @@ mod tests {
 
     #[test]
     fn youtube_stream_selection_vp9_fallback_respects_no_hdr_and_max_height() {
-        use crate::bilibili::{AudioQuality, FilterOption, VideoCodecs, VideoQuality};
+        use crate::config::{YoutubeFilterOption, YoutubeVideoCodec};
         use super::ExternalMediaFormat;
 
         let vfmt = |id: &str, h: i32, vcodec: &str, dr: &str| ExternalMediaFormat {
@@ -8472,12 +8473,12 @@ mod tests {
         };
 
         // 开启 no_hdr：4K 仅有 HDR VP9 时不应放行，应选 SDR 1080p AVC
-        let filter = FilterOption {
-            video_max_quality: VideoQuality::Quality8k,
-            video_min_quality: VideoQuality::Quality720p,
-            audio_max_quality: AudioQuality::QualityHiRES,
-            audio_min_quality: AudioQuality::Quality64k,
-            codecs: vec![VideoCodecs::AV1, VideoCodecs::AVC, VideoCodecs::HEV],
+        let filter = YoutubeFilterOption {
+            video_max_height: 4320,
+            video_min_height: 720,
+            audio_max_bitrate: i32::MAX,
+            audio_min_bitrate: 0,
+            codecs: vec![YoutubeVideoCodec::AV1, YoutubeVideoCodec::AVC, YoutubeVideoCodec::HEVC],
             no_hdr: true,
             ..Default::default()
         };
@@ -8491,12 +8492,12 @@ mod tests {
         assert_eq!(v.height, Some(1080), "no_hdr 时不应放行 HDR VP9");
 
         // 8K VP9 超出现有偏好编码高度时，应升级到 8K
-        let filter = FilterOption {
-            video_max_quality: VideoQuality::Quality8k,
-            video_min_quality: VideoQuality::Quality720p,
-            audio_max_quality: AudioQuality::QualityHiRES,
-            audio_min_quality: AudioQuality::Quality64k,
-            codecs: vec![VideoCodecs::AV1, VideoCodecs::AVC, VideoCodecs::HEV],
+        let filter = YoutubeFilterOption {
+            video_max_height: 4320,
+            video_min_height: 720,
+            audio_max_bitrate: i32::MAX,
+            audio_min_bitrate: 0,
+            codecs: vec![YoutubeVideoCodec::AV1, YoutubeVideoCodec::AVC, YoutubeVideoCodec::HEVC],
             ..Default::default()
         };
         let formats = vec![

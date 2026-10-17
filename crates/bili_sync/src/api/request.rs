@@ -247,6 +247,16 @@ pub struct UpdateConfigRequest {
     pub no_dolby_audio: Option<bool>,
     pub no_hdr: Option<bool>,
     pub no_hires: Option<bool>,
+    // YouTube 画质（与 B 站分离）
+    pub youtube_video_max_height: Option<i32>,
+    pub youtube_video_min_height: Option<i32>,
+    pub youtube_codecs: Option<Vec<String>>,
+    pub youtube_audio_max_bitrate: Option<i32>,
+    pub youtube_audio_min_bitrate: Option<i32>,
+    pub youtube_no_dolby_video: Option<bool>,
+    pub youtube_no_dolby_audio: Option<bool>,
+    pub youtube_no_hdr: Option<bool>,
+    pub youtube_no_hires: Option<bool>,
     // 弹幕设置
     pub danmaku_duration: Option<f64>,
     pub danmaku_font: Option<String>,
