@@ -12,7 +12,10 @@ use serde::Deserialize;
 pub struct SponsorSegment {
     /// `[start, end]` in seconds. POI may be length-1; we only cut length-2 skip segments.
     pub segment: Vec<f64>,
-    /// Page cid as string (multi-P filter).
+    /// YouTube video id (hash-prefix API responses include this for client-side filter).
+    #[serde(default, rename = "videoID")]
+    pub video_id: Option<String>,
+    /// Page cid as string (multi-P filter, Bilibili only).
     #[serde(default)]
     pub cid: Option<String>,
     #[serde(rename = "UUID", default)]

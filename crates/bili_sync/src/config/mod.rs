@@ -272,6 +272,9 @@ pub struct Config {
     /// BilibiliSponsorBlock 风格裁剪 / 章节标记（仅 B 站分页下载路径）
     #[serde(default)]
     pub sponsor_block: SponsorBlockConfig,
+    /// YouTube SponsorBlock（官方 sponsor.ajay.app；与 B 站配置完全分离）
+    #[serde(default = "default_sponsor_block_youtube")]
+    pub sponsor_block_youtube: SponsorBlockConfig,
     /// 下载完成后通知 Emby / Jellyfin 扫描
     #[serde(default)]
     pub media_server: MediaServerConfig,
@@ -690,6 +693,31 @@ impl Default for SponsorBlockConfig {
     }
 }
 
+/// YouTube SponsorBlock defaults (separate from Bilibili).
+fn default_sponsor_block_youtube() -> SponsorBlockConfig {
+    SponsorBlockConfig {
+        enabled: false,
+        server_address: "https://sponsor.ajay.app".to_string(),
+        mirror_server_addresses: Vec::new(),
+        categories: vec!["sponsor".to_string(), "selfpromo".to_string()],
+        mark_categories: vec![
+            "intro".to_string(),
+            "outro".to_string(),
+            "filler".to_string(),
+        ],
+        action_types: vec!["skip".to_string()],
+        cut_mode: "keyframe".to_string(),
+        cut_strategy: "beta_smart".to_string(),
+        min_segment_seconds: 0.5,
+        min_keep_gap_seconds: 0.3,
+        api_timeout_ms: 10000,
+        fail_open: true,
+        heartbeat_interval_secs: 300,
+        download_delay_hours: 24,
+    }
+}
+
+
 /// 路径映射：本容器内路径前缀 -> 媒体服务器看到的路径前缀
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, utoipa::ToSchema)]
 pub struct PathMapping {
@@ -929,6 +957,7 @@ impl Clone for Config {
             enable_cid_population: self.enable_cid_population,
             risk_control: self.risk_control.clone(),
             sponsor_block: self.sponsor_block.clone(),
+            sponsor_block_youtube: self.sponsor_block_youtube.clone(),
             media_server: self.media_server.clone(),
             ai_rename: self.ai_rename.clone(),
         }
@@ -985,6 +1014,7 @@ impl Default for Config {
             enable_cid_population: false,   // 默认关闭，减少不必要的日志
             risk_control: RiskControlConfig::default(),
             sponsor_block: SponsorBlockConfig::default(),
+            sponsor_block_youtube: default_sponsor_block_youtube(),
             media_server: MediaServerConfig::default(),
             ai_rename: crate::utils::ai_rename::AiRenameConfig::default(),
         }
@@ -1092,5 +1122,27 @@ impl Config {
         }
 
         ok
+    }
+}
+
+#[cfg(test)]
+mod youtube_sb_defaults_tests {
+    use super::{default_sponsor_block_youtube, SponsorBlockConfig};
+
+    #[test]
+    fn youtube_defaults_differ_from_bilibili() {
+        let yt = default_sponsor_block_youtube();
+        let bili = SponsorBlockConfig::default();
+        assert_eq!(yt.server_address, "https://sponsor.ajay.app");
+        assert_eq!(bili.server_address, "https://www.bsbsb.top");
+        assert_eq!(yt.download_delay_hours, 24);
+        assert_eq!(bili.download_delay_hours, 72);
+        assert_eq!(yt.categories, vec!["sponsor".to_string(), "selfpromo".to_string()]);
+        assert!(yt.categories.iter().all(|c| c != "padding"));
+        assert!(yt.mark_categories.contains(&"intro".to_string()));
+        assert!(yt.mark_categories.contains(&"outro".to_string()));
+        assert!(yt.mark_categories.contains(&"filler".to_string()));
+        assert!(yt.fail_open);
+        assert_eq!(yt.cut_strategy, "beta_smart");
     }
 }

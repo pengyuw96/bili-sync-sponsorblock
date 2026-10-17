@@ -107,20 +107,8 @@
 		{
 			id: 'network_proxy',
 			title: '网络代理',
-			description: '外源网络代理（YouTube / TikTok）',
+			description: '外源网络代理（YouTube）',
 			icon: SettingsIcon
-		},
-		{
-			id: 'douyin_login',
-			title: '抖音登录状态',
-			description: '从电脑端助手或 cookies.txt 导入',
-			icon: Music2Icon
-		},
-		{
-			id: 'tiktok_login',
-			title: 'TikTok 登录状态',
-			description: '从 cookies.txt 导入，公开内容无需登录',
-			icon: Music2Icon
 		},
 		{
 			id: 'risk',
@@ -154,8 +142,14 @@
 		},
 		{
 			id: 'sponsor_block',
-			title: 'SponsorBlock',
-			description: '裁剪赞助段，或标记章节供 Emby/Jellyfin 手动跳过',
+			title: 'SponsorBlock（B站）',
+			description: 'BilibiliSponsorBlock：裁剪赞助/垫片，或标记章节',
+			icon: ScissorsIcon
+		},
+		{
+			id: 'sponsor_block_youtube',
+			title: 'SponsorBlock（YouTube）',
+			description: '官方 sponsor.ajay.app：默认剪赞助+自我推广，片头/片尾/填充仅标记',
 			icon: ScissorsIcon
 		},
 		{
@@ -191,7 +185,7 @@
 		danmaku: '配置弹幕文件的显示样式、布局参数和同步策略。',
 		credential: '填写 B 站登录凭证，影响会员画质、互动内容和受限接口访问。',
 		youtube_login: '通过电脑端登录助手或 cookies.txt 管理 yt-dlp 使用的 YouTube 登录状态。',
-		network_proxy: '外源网络代理：YouTube 与 TikTok 的搜索、扫描、直链解析和下载共用；B站与抖音不受影响。',
+		network_proxy: '外源网络代理：YouTube 的搜索、扫描、直链解析和下载使用；B站不受影响。',
 		douyin_login: '通过同一个电脑端登录助手或 cookies.txt 管理抖音作者作品扫描和下载所需的 Cookie。',
 		tiktok_login: '管理 TikTok 作者扫描所用的 cookies.txt；TikTok 公开作者主页无需登录即可同步，导入后 yt-dlp 可访问需要登录的私密/受限内容。',
 		risk: '调整投稿源扫描时的风控规避策略、批量设置和延迟参数。',
@@ -202,6 +196,8 @@
 		ai_rename: '配置 AI 自动重命名的启用范围、提示词和相关行为。',
 		sponsor_block:
 			'下载合并后按 BilibiliSponsorBlock 处理。裁剪会从成片去掉片段，并改写字幕和弹幕时间轴；章节标记写入视频章节、字幕和弹幕，供 Emby 用下一章节手动跳过。同一类别裁剪优先，并与「下载后按章节切分」互斥。',
+		sponsor_block_youtube:
+			'YouTube 下载完成后查询官方 sponsor.ajay.app（与 B 站 bsbsb.top 完全分离）。默认硬剪 sponsor+selfpromo；intro/outro/filler 仅章节标记。默认延迟 24 小时再下载。',
 		media_server:
 			'整轮扫描下载（含 SponsorBlock 裁剪和字幕/弹幕处理）全部结束、队列空闲后，再等待设定秒数，把本轮所有变更目录映射成媒体服务器路径一次性调用 /Library/Media/Updated 定向扫描（等待期间开始新一轮则顺延到新一轮结束）；失败时可回退全库扫描 /Library/Refresh。',
 		system: '调整扫描间隔、监听端口、路径模板和基础系统行为。',
@@ -510,6 +506,27 @@
 	let sponsorBlockCheckedAt: string | null = null;
 	let sponsorBlockHealthLatencyMs: number | null = null;
 	let sponsorBlockHealthDetail = '';
+	// YouTube SponsorBlock（官方 API，与 B 站分离）
+	const youtubeSponsorBlockCategoryOptions = [
+		{ value: 'sponsor', label: '赞助广告 (sponsor)' },
+		{ value: 'selfpromo', label: '自我推广 (selfpromo)' },
+		{ value: 'intro', label: '片头 (intro)' },
+		{ value: 'outro', label: '片尾 (outro)' },
+		{ value: 'interaction', label: '互动提醒 (interaction)' },
+		{ value: 'preview', label: '预告/回顾 (preview)' },
+		{ value: 'filler', label: '过场填充 (filler)' },
+		{ value: 'music_offtopic', label: '非音乐段落 (music_offtopic)' },
+		{ value: 'poi_highlight', label: '高光标记 (poi_highlight)' }
+	] as const;
+	let sponsorBlockYoutubeEnabled = false;
+	let sponsorBlockYoutubeCategories: string[] = ['sponsor', 'selfpromo'];
+	let sponsorBlockYoutubeMarkCategories: string[] = ['intro', 'outro', 'filler'];
+	let sponsorBlockYoutubeCutMode = 'keyframe';
+	let sponsorBlockYoutubeCutStrategy = 'beta_smart';
+	let sponsorBlockYoutubeFailOpen = true;
+	let sponsorBlockYoutubeServerAddress = 'https://sponsor.ajay.app';
+	let sponsorBlockYoutubeDelayHours = 24;
+	let sponsorBlockYoutubeSaving = false;
 
 	function toggleSponsorBlockCategory(category: string, checked: boolean) {
 		if (checked) {
@@ -955,6 +972,19 @@
 		sponsorBlockFailOpen = config.sponsor_block?.fail_open ?? true;
 		sponsorBlockServerAddress = config.sponsor_block?.server_address || 'https://www.bsbsb.top';
 		sponsorBlockMirrorsText = (config.sponsor_block?.mirror_server_addresses || []).join(', ');
+		sponsorBlockYoutubeEnabled = config.sponsor_block_youtube?.enabled ?? false;
+		sponsorBlockYoutubeCategories = Array.isArray(config.sponsor_block_youtube?.categories)
+			? [...config.sponsor_block_youtube.categories]
+			: ['sponsor', 'selfpromo'];
+		sponsorBlockYoutubeMarkCategories = Array.isArray(config.sponsor_block_youtube?.mark_categories)
+			? [...config.sponsor_block_youtube.mark_categories]
+			: ['intro', 'outro', 'filler'];
+		sponsorBlockYoutubeCutMode = config.sponsor_block_youtube?.cut_mode ?? 'keyframe';
+		sponsorBlockYoutubeCutStrategy = config.sponsor_block_youtube?.cut_strategy ?? 'beta_smart';
+		sponsorBlockYoutubeFailOpen = config.sponsor_block_youtube?.fail_open ?? true;
+		sponsorBlockYoutubeServerAddress =
+			config.sponsor_block_youtube?.server_address || 'https://sponsor.ajay.app';
+		sponsorBlockYoutubeDelayHours = config.sponsor_block_youtube?.download_delay_hours ?? 24;
 		sponsorBlockLastOk =
 			typeof config.sponsor_block?.last_ok === 'boolean' ? config.sponsor_block.last_ok : null;
 		sponsorBlockCheckedAt = config.sponsor_block?.checked_at || null;
@@ -1948,6 +1978,34 @@
 
 		if (response.data.success) {
 			toast.success('SponsorBlock 配置保存成功');
+			await loadConfig();
+			openSheet = null;
+		} else {
+			toast.error('保存失败', { description: response.data.message });
+		}
+	}
+
+
+	async function saveSponsorBlockYoutubeConfig() {
+		const categories = [...sponsorBlockYoutubeCategories];
+		const markCategories = sponsorBlockYoutubeMarkCategories.filter((c) => !categories.includes(c));
+		const config: UpdateConfigRequest = {
+			sponsor_block_youtube_enabled: sponsorBlockYoutubeEnabled,
+			sponsor_block_youtube_categories: categories,
+			sponsor_block_youtube_mark_categories: markCategories,
+			sponsor_block_youtube_cut_mode: sponsorBlockYoutubeCutMode,
+			sponsor_block_youtube_cut_strategy: sponsorBlockYoutubeCutStrategy,
+			sponsor_block_youtube_fail_open: sponsorBlockYoutubeFailOpen,
+			sponsor_block_youtube_server_address: sponsorBlockYoutubeServerAddress.trim(),
+			sponsor_block_youtube_download_delay_hours: sponsorBlockYoutubeDelayHours
+		};
+		const response = await runRequest(() => api.updateConfig(config), {
+			setLoading: (value) => (sponsorBlockYoutubeSaving = value),
+			context: '保存 YouTube SponsorBlock 配置失败'
+		});
+		if (!response) return;
+		if (response.data.success) {
+			toast.success('YouTube SponsorBlock 配置保存成功');
 			await loadConfig();
 			openSheet = null;
 		} else {
@@ -5774,6 +5832,129 @@
 		<SheetFooter class={isMobile ? 'pb-safe border-t px-4 pt-3' : 'pb-safe border-t pt-4'}>
 			<Button type="submit" disabled={sponsorBlockSaving} class="w-full">
 				{sponsorBlockSaving ? '保存中...' : '保存设置'}
+			</Button>
+		</SheetFooter>
+	</form>
+</ResponsiveSheet>
+
+
+<!-- YouTube SponsorBlock 设置抽屉 -->
+<ResponsiveSheet
+	open={openSheet === 'sponsor_block_youtube'}
+	onOpenChange={(open) => {
+		if (!open) openSheet = null;
+	}}
+	title="SponsorBlock（YouTube）"
+	description="官方 sponsor.ajay.app；与 B 站配置完全分离"
+	titleTooltip={getSettingTooltip('sponsor_block_youtube')}
+	{isMobile}
+>
+	<form
+		onsubmit={(e) => {
+			e.preventDefault();
+			saveSponsorBlockYoutubeConfig();
+		}}
+		class="flex flex-col {isMobile ? 'h-[calc(90vh-8rem)]' : 'h-[calc(100vh-12rem)]'}"
+	>
+		<div class="min-h-0 flex-1 space-y-6 overflow-y-auto {isMobile ? 'px-4 py-4' : 'px-6 py-6'}">
+			<div class="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/20">
+				<p class="text-sm text-amber-700 dark:text-amber-300">
+					下载完成后查询官方 SponsorBlock（隐私 hash 前缀）。默认硬剪赞助广告与自我推广；片头 / 片尾 / 过场填充仅写入章节。默认新视频发布满 24 小时再下载。
+				</p>
+			</div>
+			<div class="flex items-center justify-between rounded-lg border p-4">
+				<div>
+					<div class="font-medium">启用 YouTube SponsorBlock</div>
+					<p class="text-muted-foreground text-xs">关闭时跳过剪切，slot 5 直接完成</p>
+				</div>
+				<Switch bind:checked={sponsorBlockYoutubeEnabled} />
+			</div>
+			<div class="space-y-2">
+				<Label>延迟下载（小时）</Label>
+				<Input type="number" min="0" max="720" bind:value={sponsorBlockYoutubeDelayHours} />
+				<p class="text-muted-foreground text-xs">0 = 关闭延迟。默认 24。</p>
+			</div>
+			<div class="space-y-2">
+				<Label>硬剪类别</Label>
+				<div class="grid gap-2">
+					{#each youtubeSponsorBlockCategoryOptions as opt}
+						<label class="flex items-center gap-2 text-sm">
+							<input
+								type="checkbox"
+								checked={sponsorBlockYoutubeCategories.includes(opt.value)}
+								onchange={(e) => {
+									const checked = (e.currentTarget as HTMLInputElement).checked;
+									if (checked) {
+										sponsorBlockYoutubeCategories = [...sponsorBlockYoutubeCategories, opt.value];
+										sponsorBlockYoutubeMarkCategories = sponsorBlockYoutubeMarkCategories.filter(
+											(c) => c !== opt.value
+										);
+									} else {
+										sponsorBlockYoutubeCategories = sponsorBlockYoutubeCategories.filter(
+											(c) => c !== opt.value
+										);
+									}
+								}}
+							/>
+							{opt.label}
+						</label>
+					{/each}
+				</div>
+			</div>
+			<div class="space-y-2">
+				<Label>章节标记类别（不硬剪）</Label>
+				<div class="grid gap-2">
+					{#each youtubeSponsorBlockCategoryOptions as opt}
+						<label class="flex items-center gap-2 text-sm">
+							<input
+								type="checkbox"
+								disabled={sponsorBlockYoutubeCategories.includes(opt.value)}
+								checked={sponsorBlockYoutubeMarkCategories.includes(opt.value)}
+								onchange={(e) => {
+									const checked = (e.currentTarget as HTMLInputElement).checked;
+									if (checked) {
+										if (sponsorBlockYoutubeCategories.includes(opt.value)) return;
+										sponsorBlockYoutubeMarkCategories = [
+											...sponsorBlockYoutubeMarkCategories,
+											opt.value
+										];
+									} else {
+										sponsorBlockYoutubeMarkCategories = sponsorBlockYoutubeMarkCategories.filter(
+											(c) => c !== opt.value
+										);
+									}
+								}}
+							/>
+							{opt.label}
+						</label>
+					{/each}
+				</div>
+			</div>
+			<div class="space-y-2">
+				<Label>裁剪策略</Label>
+				<CustomSelect
+					value={sponsorBlockYoutubeCutStrategy}
+					options={[
+						{ value: 'beta_smart', label: 'Beta 智能裁剪（默认）' },
+						{ value: 'stable', label: '稳定关键帧吸附' }
+					]}
+					onChange={(v) => (sponsorBlockYoutubeCutStrategy = String(v ?? 'beta_smart'))}
+				/>
+			</div>
+			<div class="flex items-center justify-between rounded-lg border p-4">
+				<div>
+					<div class="font-medium">失败保留原片 (fail_open)</div>
+				</div>
+				<Switch bind:checked={sponsorBlockYoutubeFailOpen} />
+			</div>
+			<div class="space-y-2">
+				<Label>API 服务器</Label>
+				<Input bind:value={sponsorBlockYoutubeServerAddress} placeholder="https://sponsor.ajay.app" />
+			</div>
+		</div>
+		<SheetFooter class="{isMobile ? 'px-4 pb-4' : 'px-6 pb-6'}">
+			<Button type="submit" disabled={sponsorBlockYoutubeSaving} class="w-full">
+				{sponsorBlockYoutubeSaving ? '保存中...' : '保存设置'}
 			</Button>
 		</SheetFooter>
 	</form>

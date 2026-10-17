@@ -372,6 +372,17 @@ pub struct UpdateConfigRequest {
     #[serde(default)]
     pub sponsor_block_cut_strategy: Option<String>,
     pub sponsor_block_fail_open: Option<bool>,
+    // YouTube SponsorBlock（与 B 站字段平行）
+    pub sponsor_block_youtube_enabled: Option<bool>,
+    pub sponsor_block_youtube_server_address: Option<String>,
+    pub sponsor_block_youtube_mirror_server_addresses: Option<Vec<String>>,
+    pub sponsor_block_youtube_categories: Option<Vec<String>>,
+    pub sponsor_block_youtube_mark_categories: Option<Vec<String>>,
+    pub sponsor_block_youtube_cut_mode: Option<String>,
+    #[serde(default)]
+    pub sponsor_block_youtube_cut_strategy: Option<String>,
+    pub sponsor_block_youtube_fail_open: Option<bool>,
+    pub sponsor_block_youtube_download_delay_hours: Option<u64>,
     // Emby/Jellyfin 扫描通知
     pub media_server_enabled: Option<bool>,
     pub media_server_type: Option<String>,

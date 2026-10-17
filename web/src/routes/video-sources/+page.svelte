@@ -202,7 +202,7 @@
 	} as const;
 
 	let loading = false;
-	let platformTab: 'youtube' | 'douyin' | 'tiktok' | 'bilibili' = 'bilibili';
+	let platformTab: 'youtube' | 'bilibili' = 'bilibili';
 	let bulkUpdating = false;
 	const videoSourcesStream = createManagedEventSource();
 	let youtubeRefreshTimer: ReturnType<typeof setInterval> | null = null;
@@ -1560,7 +1560,7 @@
 		return sourceType === 'youtube' || sourceType === 'douyin' || sourceType === 'tiktok';
 	}
 
-	function navigateToAddSource(platform: 'bilibili' | 'youtube' | 'douyin' | 'tiktok' = 'bilibili') {
+	function navigateToAddSource(platform: 'bilibili' | 'youtube' = 'bilibili') {
 		const path = resolve('/add-source');
 		goto(platform === 'bilibili' ? path : `${path}?platform=${platform}`);
 	}
@@ -1568,11 +1568,7 @@
 	function sourceEntriesForPlatform() {
 		return platformTab === 'youtube'
 			? Object.entries(YOUTUBE_SOURCE_SECTIONS)
-			: platformTab === 'douyin'
-				? Object.entries(DOUYIN_SOURCE_SECTIONS)
-				: platformTab === 'tiktok'
-					? Object.entries(TIKTOK_SOURCE_SECTIONS)
-					: Object.entries(VIDEO_SOURCES).filter(([, source]) => !isExternalSourceType(source.type));
+			: Object.entries(VIDEO_SOURCES).filter(([, source]) => !isExternalSourceType(source.type));
 	}
 
 	function getSourcesForSection(sourceConfig: {
@@ -1586,14 +1582,7 @@
 
 	onMount(() => {
 		const requestedPlatform = $page.url.searchParams.get('platform');
-		platformTab =
-			requestedPlatform === 'youtube'
-				? 'youtube'
-				: requestedPlatform === 'douyin'
-				? 'douyin'
-				: requestedPlatform === 'tiktok'
-					? 'tiktok'
-					: 'bilibili';
+		platformTab = requestedPlatform === 'youtube' ? 'youtube' : 'bilibili';
 		setBreadcrumb([{ label: '视频源管理' }]);
 		loadVideoSources();
 		startVideoSourcesStream();
@@ -1618,7 +1607,7 @@
 	<SectionHeader
 		as="h1"
 		title="视频源管理"
-		description="统一管理 B 站、YouTube 与抖音视频源；所有来源共用下载调度、路径模板、质量设置和并发控制。"
+		description="统一管理 B 站与 YouTube 视频源；所有来源共用下载调度、路径模板、质量设置和并发控制。"
 		titleTooltip="管理和配置收藏夹、合集、投稿、番剧与稍后再看视频源"
 		titleClass="font-bold {isMobileQuery.current ? 'text-xl' : 'text-2xl'}"
 		descriptionClass="text-muted-foreground {isMobileQuery.current ? 'text-sm' : 'text-base'} mt-1"
@@ -1633,7 +1622,7 @@
 					<PlusIcon class="h-4 w-4" />
 					添加 B 站视频源
 				</Button>
-			{:else if platformTab === 'youtube'}
+			{:else}
 				<Button
 					onclick={() => navigateToAddSource('youtube')}
 					class="flex items-center gap-2 {isMobileQuery.current ? 'w-full' : 'w-auto'}"
@@ -1642,34 +1631,14 @@
 					<PlusIcon class="h-4 w-4" />
 					添加 YouTube 视频源
 				</Button>
-			{:else if platformTab === 'douyin'}
-				<Button
-					onclick={() => navigateToAddSource('douyin')}
-					class="flex items-center gap-2 {isMobileQuery.current ? 'w-full' : 'w-auto'}"
-					title="添加新的抖音视频源"
-				>
-					<PlusIcon class="h-4 w-4" />
-					添加抖音视频源
-				</Button>
-			{:else}
-				<Button
-					onclick={() => navigateToAddSource('tiktok')}
-					class="flex items-center gap-2 {isMobileQuery.current ? 'w-full' : 'w-auto'}"
-					title="添加新的 TikTok 视频源"
-				>
-					<PlusIcon class="h-4 w-4" />
-					添加 TikTok 视频源
-				</Button>
 			{/if}
 		{/snippet}
 	</SectionHeader>
 
 	<Tabs.Root bind:value={platformTab}>
-		<Tabs.List class="grid w-full max-w-xl grid-cols-4">
+		<Tabs.List class="grid w-full max-w-md grid-cols-2">
 			<Tabs.Trigger value="bilibili">B 站视频源</Tabs.Trigger>
 			<Tabs.Trigger value="youtube">YouTube 视频源</Tabs.Trigger>
-			<Tabs.Trigger value="douyin">抖音视频源</Tabs.Trigger>
-			<Tabs.Trigger value="tiktok">TikTok 视频源</Tabs.Trigger>
 		</Tabs.List>
 
 		<div class="mt-6">

@@ -723,16 +723,10 @@ pub async fn get_tiktok_sources(
 }
 
 pub async fn create_tiktok_source(
-    Extension(db): Extension<std::sync::Arc<DatabaseConnection>>,
-    Json(request): Json<crate::youtube::CreateYouTubeSourceRequest>,
+    Extension(_db): Extension<std::sync::Arc<DatabaseConnection>>,
+    Json(_request): Json<crate::youtube::CreateYouTubeSourceRequest>,
 ) -> Result<ApiResponse<YouTubeSourceResponse>, ApiError> {
-    if !matches!(
-        normalize_source_type(&request.source_type)?,
-        "tiktok" | "tiktok_favorite" | "tiktok_collection",
-    ) {
-        return Err(ApiError::bad_request("请使用有效的 TikTok 来源类型"));
-    }
-    create_youtube_source(Extension(db), Json(request)).await
+    Err(ApiError::bad_request("本版本已停用 TikTok 视频源，请改用 B 站或 YouTube"))
 }
 
 pub async fn update_tiktok_source_enabled(

@@ -688,6 +688,7 @@ export interface ConfigResponse {
 	ai_rename?: AiRenameConfig;
 	// SponsorBlock 裁剪配置
 	sponsor_block?: SponsorBlockConfig;
+	sponsor_block_youtube?: SponsorBlockConfig;
 	// Emby/Jellyfin 扫描通知
 	media_server?: MediaServerConfig;
 	// 服务器绑定地址
@@ -933,6 +934,15 @@ export interface UpdateConfigRequest {
 	sponsor_block_cut_mode?: string;
 	sponsor_block_cut_strategy?: string;
 	sponsor_block_fail_open?: boolean;
+	sponsor_block_youtube_enabled?: boolean;
+	sponsor_block_youtube_server_address?: string;
+	sponsor_block_youtube_mirror_server_addresses?: string[];
+	sponsor_block_youtube_categories?: string[];
+	sponsor_block_youtube_mark_categories?: string[];
+	sponsor_block_youtube_cut_mode?: string;
+	sponsor_block_youtube_cut_strategy?: string;
+	sponsor_block_youtube_fail_open?: boolean;
+	sponsor_block_youtube_download_delay_hours?: number;
 	// Emby/Jellyfin 扫描通知
 	media_server_enabled?: boolean;
 	media_server_type?: string;

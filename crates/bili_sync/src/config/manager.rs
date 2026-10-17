@@ -98,6 +98,7 @@ pub(crate) fn describe_config_key(key: &str) -> &'static str {
         "version" => "旧版配置版本号",
         "risk_control" => "风控验证配置",
         "sponsor_block" => "BilibiliSponsorBlock 赞助/垫片裁剪与章节标记",
+        "sponsor_block_youtube" => "YouTube SponsorBlock 赞助裁剪与章节标记",
         "split_chapters_after_download" => "下载后按播放器章节切分",
         "ai_rename" => "AI重命名配置",
         "media_server" => "Emby/Jellyfin 扫描通知",

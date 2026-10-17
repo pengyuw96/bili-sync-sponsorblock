@@ -760,14 +760,11 @@
 
 	onMount(async () => {
 		const requestedPlatform = $page.url.searchParams.get('platform');
+		// 本版本只维护 B 站 + YouTube；抖音/TikTok 入口已关闭
 		sourcePlatform =
 			requestedPlatform === 'youtube'
 				? 'youtube'
-				: requestedPlatform === 'douyin'
-					? 'douyin'
-					: requestedPlatform === 'tiktok'
-						? 'tiktok'
-						: 'bilibili';
+				: 'bilibili';
 		if (sourcePlatform === 'youtube') {
 			handleYouTubeSourceTypeChange('subscriptions');
 		} else if (sourcePlatform === 'douyin') {

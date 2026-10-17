@@ -11381,26 +11381,49 @@ pub async fn get_config() -> Result<ApiResponse<crate::api::response::ConfigResp
             audio_prompt_hint: config.ai_rename.audio_prompt_hint.clone(),
             rename_parent_dir: config.ai_rename.rename_parent_dir,
         },
-        // SponsorBlock 裁剪配置
+        // SponsorBlock 裁剪配置（B 站）
         sponsor_block: {
             let summary = crate::sponsorblock::health::last_health_summary();
+            let sb = &config.sponsor_block;
             crate::api::response::SponsorBlockConfigResponse {
-                enabled: config.sponsor_block.enabled,
-                server_address: config.sponsor_block.server_address.clone(),
-                mirror_server_addresses: config.sponsor_block.mirror_server_addresses.clone(),
-                categories: config.sponsor_block.categories.clone(),
-                mark_categories: config.sponsor_block.mark_categories.clone(),
-                action_types: config.sponsor_block.action_types.clone(),
-                cut_mode: config.sponsor_block.cut_mode.clone(),
-                cut_strategy: config.sponsor_block.cut_strategy.clone(),
-                min_segment_seconds: config.sponsor_block.min_segment_seconds,
-                min_keep_gap_seconds: config.sponsor_block.min_keep_gap_seconds,
-                api_timeout_ms: config.sponsor_block.api_timeout_ms,
-                fail_open: config.sponsor_block.fail_open,
+                enabled: sb.enabled,
+                server_address: sb.server_address.clone(),
+                mirror_server_addresses: sb.mirror_server_addresses.clone(),
+                categories: sb.categories.clone(),
+                mark_categories: sb.mark_categories.clone(),
+                action_types: sb.action_types.clone(),
+                cut_mode: sb.cut_mode.clone(),
+                cut_strategy: sb.cut_strategy.clone(),
+                min_segment_seconds: sb.min_segment_seconds,
+                min_keep_gap_seconds: sb.min_keep_gap_seconds,
+                api_timeout_ms: sb.api_timeout_ms,
+                fail_open: sb.fail_open,
                 last_ok: summary.as_ref().map(|s| s.last_ok),
                 checked_at: summary.as_ref().map(|s| s.checked_at.clone()),
-                heartbeat_interval_secs: config.sponsor_block.heartbeat_interval_secs,
-                download_delay_hours: config.sponsor_block.download_delay_hours,
+                heartbeat_interval_secs: sb.heartbeat_interval_secs,
+                download_delay_hours: sb.download_delay_hours,
+            }
+        },
+        // YouTube SponsorBlock（官方 API）
+        sponsor_block_youtube: {
+            let sb = &config.sponsor_block_youtube;
+            crate::api::response::SponsorBlockConfigResponse {
+                enabled: sb.enabled,
+                server_address: sb.server_address.clone(),
+                mirror_server_addresses: sb.mirror_server_addresses.clone(),
+                categories: sb.categories.clone(),
+                mark_categories: sb.mark_categories.clone(),
+                action_types: sb.action_types.clone(),
+                cut_mode: sb.cut_mode.clone(),
+                cut_strategy: sb.cut_strategy.clone(),
+                min_segment_seconds: sb.min_segment_seconds,
+                min_keep_gap_seconds: sb.min_keep_gap_seconds,
+                api_timeout_ms: sb.api_timeout_ms,
+                fail_open: sb.fail_open,
+                last_ok: None,
+                checked_at: None,
+                heartbeat_interval_secs: sb.heartbeat_interval_secs,
+                download_delay_hours: sb.download_delay_hours,
             }
         },
         media_server: crate::api::response::MediaServerConfigResponse {
@@ -12094,7 +12117,8 @@ fn config_update_field_display_name(field: &str) -> String {
         "risk_control.auto_solve.max_retries" => Some("自动打码最大重试"),
         "risk_control.auto_solve.solve_timeout" => Some("自动打码单次超时"),
         "ai_rename" => Some("AI重命名配置"),
-        "sponsor_block" => Some("SponsorBlock裁剪配置"),
+        "sponsor_block" => Some("SponsorBlock裁剪配置（B站）"),
+        "sponsor_block_youtube" => Some("SponsorBlock裁剪配置（YouTube）"),
         "media_server" => Some("Emby/Jellyfin扫描通知"),
         _ => None,
     };
@@ -13554,6 +13578,121 @@ pub async fn update_config_internal(
         }
     }
 
+
+    // YouTube SponsorBlock 配置更新（与 B 站平行，互不影响）
+    {
+        let yt = &mut config.sponsor_block_youtube;
+        let defaults = crate::config::SponsorBlockConfig {
+            enabled: false,
+            server_address: "https://sponsor.ajay.app".to_string(),
+            mirror_server_addresses: Vec::new(),
+            categories: vec!["sponsor".to_string(), "selfpromo".to_string()],
+            mark_categories: vec!["intro".to_string(), "outro".to_string(), "filler".to_string()],
+            action_types: vec!["skip".to_string()],
+            cut_mode: "keyframe".to_string(),
+            cut_strategy: "beta_smart".to_string(),
+            min_segment_seconds: 0.5,
+            min_keep_gap_seconds: 0.3,
+            api_timeout_ms: 10000,
+            fail_open: true,
+            heartbeat_interval_secs: 300,
+            download_delay_hours: 24,
+        };
+        if let Some(enabled) = params.sponsor_block_youtube_enabled {
+            if yt.enabled != enabled {
+                yt.enabled = enabled;
+                updated_fields.push("sponsor_block_youtube");
+            }
+        }
+        if let Some(server_address) = &params.sponsor_block_youtube_server_address {
+            let normalized = if server_address.trim().is_empty() {
+                defaults.server_address.clone()
+            } else {
+                server_address.trim().trim_end_matches('/').to_string()
+            };
+            if yt.server_address != normalized {
+                yt.server_address = normalized;
+                updated_fields.push("sponsor_block_youtube");
+            }
+        }
+        if let Some(mirrors) = &params.sponsor_block_youtube_mirror_server_addresses {
+            let normalized: Vec<String> = mirrors
+                .iter()
+                .map(|s| s.trim().trim_end_matches('/').to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            if yt.mirror_server_addresses != normalized {
+                yt.mirror_server_addresses = normalized;
+                updated_fields.push("sponsor_block_youtube");
+            }
+        }
+        if let Some(categories) = &params.sponsor_block_youtube_categories {
+            let final_categories: Vec<String> = categories
+                .iter()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            if yt.categories != final_categories {
+                yt.categories = final_categories;
+                updated_fields.push("sponsor_block_youtube");
+            }
+        }
+        if let Some(mark_categories) = &params.sponsor_block_youtube_mark_categories {
+            let normalized: Vec<String> = mark_categories
+                .iter()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            if yt.mark_categories != normalized {
+                yt.mark_categories = normalized;
+                updated_fields.push("sponsor_block_youtube");
+            }
+        }
+        if params.sponsor_block_youtube_categories.is_some()
+            || params.sponsor_block_youtube_mark_categories.is_some()
+        {
+            let cut_set: std::collections::HashSet<String> = yt.categories.iter().cloned().collect();
+            let before = yt.mark_categories.len();
+            yt.mark_categories.retain(|c| !cut_set.contains(c));
+            if yt.mark_categories.len() != before {
+                updated_fields.push("sponsor_block_youtube");
+            }
+        }
+        if let Some(cut_mode) = params.sponsor_block_youtube_cut_mode.as_deref() {
+            let cut_mode = match cut_mode.trim() {
+                "accurate" => "accurate",
+                _ => "keyframe",
+            };
+            if yt.cut_mode != cut_mode {
+                yt.cut_mode = cut_mode.to_string();
+                updated_fields.push("sponsor_block_youtube");
+            }
+        }
+        if let Some(strategy) = params.sponsor_block_youtube_cut_strategy.as_deref() {
+            let strategy = match strategy.trim() {
+                "beta_smart" => "beta_smart",
+                _ => "stable",
+            };
+            if yt.cut_strategy != strategy {
+                yt.cut_strategy = strategy.to_string();
+                updated_fields.push("sponsor_block_youtube");
+            }
+        }
+        if let Some(fail_open) = params.sponsor_block_youtube_fail_open {
+            if yt.fail_open != fail_open {
+                yt.fail_open = fail_open;
+                updated_fields.push("sponsor_block_youtube");
+            }
+        }
+        if let Some(hours) = params.sponsor_block_youtube_download_delay_hours {
+            let hours = hours.min(24 * 30);
+            if yt.download_delay_hours != hours {
+                yt.download_delay_hours = hours;
+                updated_fields.push("sponsor_block_youtube");
+            }
+        }
+    }
+
     if updated_fields.is_empty() {
         return Ok(crate::api::response::UpdateConfigResponse {
             success: false,
@@ -13995,6 +14134,14 @@ pub async fn update_config_internal(
                 "sponsor_block" => {
                     manager
                         .update_config_item("sponsor_block", serde_json::to_value(&config.sponsor_block)?)
+                        .await
+                }
+                "sponsor_block_youtube" => {
+                    manager
+                        .update_config_item(
+                            "sponsor_block_youtube",
+                            serde_json::to_value(&config.sponsor_block_youtube)?,
+                        )
                         .await
                 }
                 _ => {

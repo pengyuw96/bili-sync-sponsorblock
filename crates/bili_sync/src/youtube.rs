@@ -1209,13 +1209,10 @@ pub async fn create_youtube_source_checked(
 }
 
 pub async fn create_douyin_source(
-    Extension(db): Extension<std::sync::Arc<DatabaseConnection>>,
-    Json(request): Json<CreateYouTubeSourceRequest>,
+    Extension(_db): Extension<std::sync::Arc<DatabaseConnection>>,
+    Json(_request): Json<CreateYouTubeSourceRequest>,
 ) -> Result<ApiResponse<YouTubeSourceResponse>, ApiError> {
-    if !normalize_source_type(&request.source_type)?.starts_with("douyin") {
-        return Err(ApiError::bad_request("请使用有效的抖音来源类型"));
-    }
-    create_youtube_source(Extension(db), Json(request)).await
+    Err(ApiError::bad_request("本版本已停用抖音视频源，请改用 B 站或 YouTube"))
 }
 
 
@@ -1820,13 +1817,47 @@ fn youtube_page_status(video: &youtube_video::Model) -> PageStatus {
     PageStatus::from(video.page_task_status)
 }
 
-/// External page tasks stay at 5 meaningful slots; slot 5 (SponsorBlock cut) is N/A → always OK.
+/// External page tasks: slot 5 is SponsorBlock cut for YouTube; N/A (always OK) for Douyin/TikTok
+/// and when YouTube SB is disabled.
 fn ensure_youtube_page_status(video: &youtube_video::Model) -> PageStatus {
+    ensure_youtube_page_status_with_sb(video, false)
+}
+
+fn ensure_youtube_page_status_with_sb(video: &youtube_video::Model, youtube_sb_active: bool) -> PageStatus {
     let mut status = PageStatus::from(video.page_task_status);
-    if status.get(crate::utils::status::PAGE_STATUS_SPONSOR_CUT_INDEX) < STATUS_OK {
-        status.set(crate::utils::status::PAGE_STATUS_SPONSOR_CUT_INDEX, STATUS_OK);
+    if !youtube_sb_active {
+        if status.get(crate::utils::status::PAGE_STATUS_SPONSOR_CUT_INDEX) < STATUS_OK {
+            status.set(crate::utils::status::PAGE_STATUS_SPONSOR_CUT_INDEX, STATUS_OK);
+        }
     }
     status
+}
+
+fn youtube_source_sb_active(source: &youtube_source::Model) -> bool {
+    !is_douyin_source(source)
+        && !crate::tiktok::is_tiktok_source(source)
+        && crate::config::reload_config().sponsor_block_youtube.enabled
+}
+
+/// Whether a pending YouTube video is still inside the SB download-delay window.
+fn youtube_within_sb_download_delay(video: &youtube_video::Model, delay_hours: u64) -> bool {
+    if delay_hours == 0 {
+        return false;
+    }
+    // Only never-started downloads (pending + no retries yet).
+    if video.download_status != "pending" || video.retry_count > 0 {
+        return false;
+    }
+    let Some(published) = video
+        .published_at
+        .as_deref()
+        .and_then(parse_youtube_upload_date)
+    else {
+        return false;
+    };
+    let now = chrono::Utc::now().naive_utc();
+    let delay = chrono::Duration::hours(delay_hours.min(1_000_000) as i64);
+    now.signed_duration_since(published) < delay
 }
 
 
@@ -2942,8 +2973,16 @@ fn ytdlp_flat_item_cover_url(item: &serde_json::Value) -> Option<String> {
 }
 
 async fn scan_source(db: &DatabaseConnection, source: &youtube_source::Model) -> Result<u64> {
-    if is_douyin_source(source) {
-        return scan_douyin_source(db, source).await;
+    // 本版本只维护 B 站 + YouTube：抖音 / TikTok 源停止扫描与更新（已下载文件保留）。
+    if is_douyin_source(source) || crate::tiktok::is_tiktok_source(source) {
+        info!(
+            source_id = source.id,
+            source_type = %source.source_type,
+            "跳过扫描{}视频源「{}」（本版本不再维护抖音/TikTok）",
+            source_platform_label(source),
+            source.name
+        );
+        return Ok(0);
     }
     if source.source_type == "tiktok_favorite" {
         crate::tiktok::ensure_tiktok_session()?;
@@ -3382,12 +3421,57 @@ async fn download_pending(
     if videos.is_empty() {
         return Ok(());
     }
+    let sources = youtube_source::Entity::find().all(db).await?;
+    let source_by_id: HashMap<i32, youtube_source::Model> =
+        sources.into_iter().map(|s| (s.id, s)).collect();
+    // Douyin/TikTok 已停维护：跳过其下载队列（已下载文件保留）。
+    let yt_sb = crate::config::reload_config().sponsor_block_youtube.clone();
+    let mut deferred = 0usize;
+    let mut skipped_retired = 0usize;
+    let videos: Vec<_> = videos
+        .into_iter()
+        .filter(|video| {
+            let Some(source) = source_by_id.get(&video.source_id) else {
+                return false;
+            };
+            if is_douyin_source(source) || crate::tiktok::is_tiktok_source(source) {
+                skipped_retired += 1;
+                return false;
+            }
+            if yt_sb.enabled
+                && youtube_within_sb_download_delay(video, yt_sb.download_delay_hours)
+            {
+                deferred += 1;
+                debug!(
+                    youtube_id = %video.youtube_id,
+                    delay_hours = yt_sb.download_delay_hours,
+                    "YouTube SponsorBlock 延迟下载：发布未满 {} 小时，本轮跳过",
+                    yt_sb.download_delay_hours
+                );
+                return false;
+            }
+            true
+        })
+        .collect();
+    if deferred > 0 {
+        info!(
+            "YouTube 有 {} 个新视频发布未满 {} 小时，延迟下载（等待 SponsorBlock 片段）",
+            deferred, yt_sb.download_delay_hours
+        );
+    }
+    if skipped_retired > 0 {
+        info!(
+            "已跳过 {} 个抖音/TikTok 待下载视频（本版本不再维护抖音/TikTok）",
+            skipped_retired
+        );
+    }
+    if videos.is_empty() {
+        return Ok(());
+    }
     let platforms = Arc::new(
-        youtube_source::Entity::find()
-            .all(db)
-            .await?
-            .into_iter()
-            .map(|source| (source.id, source_platform_label(&source)))
+        source_by_id
+            .iter()
+            .map(|(id, source)| (*id, source_platform_label(source)))
             .collect::<HashMap<_, _>>(),
     );
     // TikTok 对连续 yt-dlp 解析请求非常敏感：标记出 TikTok 来源，视频间插入
@@ -3525,8 +3609,9 @@ async fn download_video(
     // B 站式按位调度：媒体（视频4/分页1）已完成、只有封面/NFO/头像等附属子任务
     // 需要重跑时，只重建附属文件，绝不重新下载媒体 —— 媒体被移走的已完成视频
     // 也不会被重新拉回下载队列。
+    let yt_sb_active = youtube_source_sb_active(&source);
     let video_status = VideoStatus::from(video.video_task_status);
-    let page_status = ensure_youtube_page_status(&video);
+    let page_status = ensure_youtube_page_status_with_sb(&video, yt_sb_active);
     let video_run = video_status.should_run();
     let page_run = page_status.should_run();
     let media_pending = video_run[4] || page_run[1];
@@ -3644,8 +3729,58 @@ async fn download_video(
                         }
                     }
                 }
+                // Slot 5: YouTube SponsorBlock cut (official API). Douyin/TikTok / disabled → OK.
+                let mut page_bits = youtube_all_page_tasks_ok_bits();
+                if yt_sb_active
+                    && !downloaded.is_image_post
+                    && !source.audio_only
+                    && downloaded.output_path.exists()
+                {
+                    let danmaku_path = downloaded.output_path.with_extension("ass");
+                    let subtitle_stem = downloaded.output_path.with_extension("");
+                    let duration_secs = downloaded.duration_seconds.unwrap_or(0).max(0) as u32;
+                    let sb_config = crate::config::reload_config().sponsor_block_youtube.clone();
+                    let outcome = crate::sponsorblock::maybe_cut_youtube_sponsor_segments(
+                        &downloaded.output_path,
+                        &danmaku_path,
+                        &subtitle_stem,
+                        &video.youtube_id,
+                        duration_secs,
+                        &sb_config,
+                    )
+                    .await;
+                    let mut page_status = PageStatus::from(page_bits);
+                    match outcome {
+                        Ok(out) => {
+                            info!(
+                                youtube_id = %video.youtube_id,
+                                result = out.result_code(),
+                                "YouTube SponsorBlock 处理完成"
+                            );
+                            page_status.set(
+                                crate::utils::status::PAGE_STATUS_SPONSOR_CUT_INDEX,
+                                STATUS_OK,
+                            );
+                            if let Some(secs) = out.measured_duration_secs() {
+                                downloaded.duration_seconds = Some(secs as i32);
+                            }
+                        }
+                        Err(e) => {
+                            warn!(
+                                youtube_id = %video.youtube_id,
+                                error = %e,
+                                "YouTube SponsorBlock 处理失败"
+                            );
+                            page_status.set(
+                                crate::utils::status::PAGE_STATUS_SPONSOR_CUT_INDEX,
+                                1,
+                            );
+                        }
+                    }
+                    page_bits = page_status.into();
+                }
                 active.video_task_status = Set(youtube_all_tasks_ok_bits());
-                active.page_task_status = Set(youtube_all_page_tasks_ok_bits());
+                active.page_task_status = Set(page_bits);
                 active.download_status = Set("completed".to_string());
                 active.retry_count = Set(0);
                 active.output_path = Set(Some(downloaded.output_path.display().to_string()));

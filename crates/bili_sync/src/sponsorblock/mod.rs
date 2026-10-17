@@ -62,6 +62,57 @@ mod cut_gate_tests {
     }
 }
 
+/// Which platform's SponsorBlock API / id semantics to use.
+#[derive(Debug, Clone, Copy)]
+pub enum SponsorPlatformId<'a> {
+    /// Bilibili: videoID=bvid + cid filter; server = bsbsb.top family.
+    Bilibili { bvid: &'a str, cid: i64 },
+    /// YouTube: videoID=youtube id; server = sponsor.ajay.app; no cid.
+    YouTube { video_id: &'a str },
+}
+
+impl<'a> SponsorPlatformId<'a> {
+    fn log_id(&self) -> String {
+        match self {
+            Self::Bilibili { bvid, cid } => format!("{} cid={}", bvid, cid),
+            Self::YouTube { video_id } => (*video_id).to_string(),
+        }
+    }
+
+    fn matches_segment(&self, seg: &model::SponsorSegment) -> bool {
+        match self {
+            Self::Bilibili { cid, .. } => seg.matches_cid(*cid),
+            Self::YouTube { video_id } => match seg.video_id.as_deref() {
+                None | Some("") => true,
+                Some(id) => id == *video_id,
+            },
+        }
+    }
+}
+
+/// YouTube entry: official SponsorBlock API + existing cut/mark/sidecar pipeline.
+pub async fn maybe_cut_youtube_sponsor_segments(
+    page_path: &Path,
+    danmaku_path: &Path,
+    subtitle_stem: &Path,
+    youtube_id: &str,
+    duration_secs: u32,
+    config: &SponsorBlockConfig,
+) -> Result<SponsorCutOutcome> {
+    maybe_cut_sponsor_segments_for(
+        page_path,
+        danmaku_path,
+        subtitle_stem,
+        SponsorPlatformId::YouTube {
+            video_id: youtube_id,
+        },
+        duration_secs,
+        config,
+        false,
+    )
+    .await
+}
+
 /// Orchestrate fetch → cut → mark for one Bilibili page media file.
 ///
 /// Fail-open: on any error when `fail_open` is true, logs a warning and leaves
@@ -76,14 +127,36 @@ pub async fn maybe_cut_sponsor_segments(
     config: &SponsorBlockConfig,
     skip_because_chapter_split: bool,
 ) -> Result<SponsorCutOutcome> {
+    maybe_cut_sponsor_segments_for(
+        page_path,
+        danmaku_path,
+        subtitle_stem,
+        SponsorPlatformId::Bilibili { bvid, cid },
+        duration_secs,
+        config,
+        skip_because_chapter_split,
+    )
+    .await
+}
+
+/// Platform-agnostic fetch → cut → mark.
+pub async fn maybe_cut_sponsor_segments_for(
+    page_path: &Path,
+    danmaku_path: &Path,
+    subtitle_stem: &Path,
+    platform: SponsorPlatformId<'_>,
+    duration_secs: u32,
+    config: &SponsorBlockConfig,
+    skip_because_chapter_split: bool,
+) -> Result<SponsorCutOutcome> {
     if !config.enabled {
         return Ok(SponsorCutOutcome::Disabled);
     }
 
     if skip_because_chapter_split {
         info!(
-            "SponsorBlock: skip cut/mark for {} cid={} because split_chapters_after_download is enabled (mutual exclusion)",
-            bvid, cid
+            "SponsorBlock: skip cut/mark for {} because split_chapters_after_download is enabled (mutual exclusion)",
+            platform.log_id()
         );
         return Ok(SponsorCutOutcome::SkippedForChapters);
     }
@@ -107,8 +180,8 @@ pub async fn maybe_cut_sponsor_segments(
 
     if cut_categories.is_empty() && mark_categories.is_empty() {
         debug!(
-            "SponsorBlock: enabled but no cut/mark categories for {} cid={}",
-            bvid, cid
+            "SponsorBlock: enabled but no cut/mark categories for {}",
+            platform.log_id()
         );
         return Ok(SponsorCutOutcome::Noop);
     }
@@ -142,10 +215,19 @@ pub async fn maybe_cut_sponsor_segments(
         cats
     };
 
-    let segments = match client
-        .fetch_skip_segments_for_categories(config, bvid, cid, &fetch_categories)
-        .await
-    {
+    let segments = match platform {
+        SponsorPlatformId::Bilibili { bvid, cid } => {
+            client
+                .fetch_skip_segments_for_categories(config, bvid, cid, &fetch_categories)
+                .await
+        }
+        SponsorPlatformId::YouTube { video_id } => {
+            client
+                .fetch_youtube_skip_segments_for_categories(config, video_id, &fetch_categories)
+                .await
+        }
+    };
+    let segments = match segments {
         Ok(s) => s,
         Err(e) => {
             return fail_open_or_err(config, e, "fetch segments");
@@ -153,7 +235,7 @@ pub async fn maybe_cut_sponsor_segments(
     };
 
     if segments.is_empty() {
-        debug!("SponsorBlock: no segments for {} cid={}", bvid, cid);
+        debug!("SponsorBlock: no segments for {}", platform.log_id());
         return Ok(SponsorCutOutcome::Noop);
     }
 
@@ -163,7 +245,7 @@ pub async fn maybe_cut_sponsor_segments(
     let mut mark_raw: Vec<(f64, f64, String)> = Vec::new(); // start, end, category
 
     for seg in &segments {
-        if !seg.matches_cid(cid) {
+        if !platform.matches_segment(seg) {
             continue;
         }
         // MVP: only process skip action type for both cut and mark.
@@ -176,8 +258,8 @@ pub async fn maybe_cut_sponsor_segments(
         if let Some(vd) = seg.video_duration {
             if vd > 0.0 && api_duration > 0.0 && (vd - api_duration).abs() > 2.0 {
                 debug!(
-                    "SponsorBlock: drop segment {:?} due to videoDuration mismatch (seg={}, page={})",
-                    seg.uuid, vd, api_duration
+                    "SponsorBlock: drop segment {:?} due to videoDuration mismatch (seg={}, page={}) for {}",
+                    seg.uuid, vd, api_duration, platform.log_id()
                 );
                 continue;
             }
@@ -210,15 +292,15 @@ pub async fn maybe_cut_sponsor_segments(
         ) {
             None => {
                 warn!(
-                    "SponsorBlock: cutting would remove ~100% of {} cid={}, keeping original (fail_open)",
-                    bvid, cid
+                    "SponsorBlock: cutting would remove ~100% of {}, keeping original (fail_open)",
+                    platform.log_id()
                 );
                 would_remove_all = true;
             }
             Some(k) if k.is_empty() => {
                 debug!(
-                    "SponsorBlock: no effective cut ranges for {} cid={}",
-                    bvid, cid
+                    "SponsorBlock: no effective cut ranges for {}",
+                    platform.log_id()
                 );
             }
             Some(keep) => {
@@ -231,8 +313,8 @@ pub async fn maybe_cut_sponsor_segments(
                     Ok(kfs) => kfs,
                     Err(e) => {
                         warn!(
-                            "SponsorBlock keyframe probe failed for {} cid={} (cut without snap): {:#}",
-                            bvid, cid, e
+                            "SponsorBlock keyframe probe failed for {} (cut without snap): {:#}",
+                            platform.log_id(), e
                         );
                         Vec::new()
                     }
@@ -249,10 +331,14 @@ pub async fn maybe_cut_sponsor_segments(
                     if !exact_removes.is_empty() {
                         let parent = page_path.parent().unwrap_or_else(|| Path::new("."));
                         let ext = page_path.extension().and_then(|s| s.to_str()).unwrap_or("mp4");
+                        let file_key = match platform {
+                            SponsorPlatformId::Bilibili { cid, .. } => cid,
+                            SponsorPlatformId::YouTube { .. } => 0,
+                        };
                         let tmp_out = parent.join(format!(
                             ".bili-sync-sponsor-smartcut-{}-{}.{}",
                             std::process::id(),
-                            cid,
+                            file_key,
                             ext
                         ));
                         let _cut_permit = acquire_cut_permit().await;
@@ -260,8 +346,8 @@ pub async fn maybe_cut_sponsor_segments(
                             Ok(stats) => match atomic_replace(page_path, &tmp_out).await {
                                 Ok(()) => {
                                     info!(
-                                        "SponsorBlock: beta smart cut {} cid={} — exact keep {} parts, re-encoded {:.2}s",
-                                        bvid, cid, keep.len(), stats.encoded_secs
+                                        "SponsorBlock: beta smart cut {} — exact keep {} parts, re-encoded {:.2}s",
+                                        platform.log_id(), keep.len(), stats.encoded_secs
                                     );
                                     removed_approx_secs = exact_removes.iter().map(|(s, e)| (e - s).max(0.0)).sum();
                                     did_cut = true;
@@ -277,8 +363,8 @@ pub async fn maybe_cut_sponsor_segments(
                             Err(e) => {
                                 let _ = tokio::fs::remove_file(&tmp_out).await;
                                 warn!(
-                                    "SponsorBlock beta smart cut failed for {} cid={}, falling back to stable keyframe cut: {:#}",
-                                    bvid, cid, e
+                                    "SponsorBlock beta smart cut failed for {}, falling back to stable keyframe cut: {:#}",
+                                    platform.log_id(), e
                                 );
                             }
                         }
@@ -292,15 +378,14 @@ pub async fn maybe_cut_sponsor_segments(
                 let mut cut_removes = removes_from_keeps(&keep, duration);
                 if cut_removes.is_empty() || keep.is_empty() {
                     debug!(
-                        "SponsorBlock: after keyframe snap, nothing to cut for {} cid={}",
-                        bvid, cid
+                        "SponsorBlock: after keyframe snap, nothing to cut for {}",
+                        platform.log_id()
                     );
                 } else {
                 removed_approx_secs = cut_removes.iter().map(|(s, e)| (e - s).max(0.0)).sum();
                 info!(
-                    "SponsorBlock: cutting {} cid={} — ~{:.1}s remove, {} keep parts (keyframes={}) → {}",
-                    bvid,
-                    cid,
+                    "SponsorBlock: cutting {} — ~{:.1}s remove, {} keep parts (keyframes={}) → {}",
+                    platform.log_id(),
                     removed_approx_secs,
                     keep.len(),
                     keyframes.len(),
@@ -312,10 +397,14 @@ pub async fn maybe_cut_sponsor_segments(
                     .extension()
                     .and_then(|s| s.to_str())
                     .unwrap_or("mp4");
+                let file_key = match platform {
+                    SponsorPlatformId::Bilibili { cid, .. } => cid,
+                    SponsorPlatformId::YouTube { .. } => 0,
+                };
                 let tmp_out = parent.join(format!(
                     ".bili-sync-sponsor-cut-{}-{}.{}",
                     std::process::id(),
-                    cid,
+                    file_key,
                     ext
                 ));
 
@@ -437,10 +526,9 @@ pub async fn maybe_cut_sponsor_segments(
     let mut mark_failed_open = false;
     if !chapters.is_empty() {
         info!(
-            "SponsorBlock: marking {} chapters on {} cid={} → {}",
+            "SponsorBlock: marking {} chapters on {} → {}",
             chapters.len(),
-            bvid,
-            cid,
+            platform.log_id(),
             page_path.display()
         );
         match embed_chapters_in_place(page_path, &chapters, new_duration).await {
@@ -520,8 +608,8 @@ pub async fn maybe_cut_sponsor_segments(
     }
     if remove_intervals.is_empty() && mark_raw.is_empty() {
         debug!(
-            "SponsorBlock: no matching skip segments for {} cid={}",
-            bvid, cid
+            "SponsorBlock: no matching skip segments for {}",
+            platform.log_id()
         );
     }
     Ok(SponsorCutOutcome::Noop)

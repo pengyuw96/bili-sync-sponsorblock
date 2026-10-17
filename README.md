@@ -2,7 +2,7 @@
 
 # bili-sync-sponsorblock
 
-**B 站视频自动下载 + SponsorBlock 广告剪辑 + 核显智能精确裁剪，为 NAS 与 Emby / Jellyfin 而生**
+**B 站 / YouTube 自动下载 + SponsorBlock 广告剪辑 + 核显智能精确裁剪，为 NAS 与 Emby / Jellyfin 而生**
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./License)
 [![Last commit](https://img.shields.io/github/last-commit/pengyuw96/bili-sync-sponsorblock)](https://github.com/pengyuw96/bili-sync-sponsorblock/commits/main)
@@ -33,7 +33,9 @@
 
 ## ✨ 功能亮点
 
-- ✂️ **SponsorBlock 自动剪辑**：下载合并后拉取 BilibiliSponsorBlock 片段，剪掉恰饭 / 片头片尾等类别，原子替换原文件。
+- ✂️ **SponsorBlock 自动剪辑（B 站）**：下载合并后拉取 BilibiliSponsorBlock 片段，剪掉恰饭 / 垫片等类别，原子替换原文件；默认发布满 72 小时再下载。
+- ▶️ **YouTube SponsorBlock**：下载完成后查询官方 `sponsor.ajay.app`（隐私 hash 前缀，与 B 站 `bsbsb.top` 完全分离）；默认硬剪 `sponsor` + `selfpromo`，`intro` / `outro` / `filler` 仅章节标记；默认发布满 24 小时再下载；裁剪复用现有智能裁剪管线。
+- 🚫 **仅维护 B 站 + YouTube**：抖音 / TikTok 入口与扫描已停用（已下载文件保留，数据库迁移保留）。
 - 🎛️ **按视频源单独开关**：每个收藏夹、合集、UP 主投稿、稍后再看都可以单独启用或关闭剪辑，新建视频源时即可设置。
 - 🔑 **关键帧裁剪（stable，默认）**：纯流复制，不重新编码，画质无损、速度快，切点吸附到关键帧。
 - 🎯 **智能精确裁剪（BETA）**：只重编码每个切点到相邻关键帧之间的几秒，其余部分流复制，切点精确到帧。
@@ -186,6 +188,19 @@ services:
 | `min_keep_gap_seconds` | — | 短于此值的保留间隙并入删除区间 |
 | `fail_open` | `true` | 出错时保留原片，只记日志 |
 | `heartbeat_interval_secs` | `300` | 服务器心跳检测间隔，0 为关闭 |
+| `download_delay_hours` | `72` | 新视频发布后延迟下载小时数（0 关闭），给片段提交留时间 |
+
+`sponsor_block_youtube` 配置段（与 B 站完全分离，Web 设置页「SponsorBlock（YouTube）」）：
+
+| 字段 | 默认值 | 说明 |
+|---|---|---|
+| `enabled` | `false` | YouTube 总开关 |
+| `server_address` | `https://sponsor.ajay.app` | 官方 SponsorBlock API |
+| `categories` | `["sponsor","selfpromo"]` | 硬剪类别 |
+| `mark_categories` | `["intro","outro","filler"]` | 仅章节标记 |
+| `cut_strategy` | `beta_smart` | 默认复用智能裁剪 |
+| `download_delay_hours` | `24` | 新视频延迟下载（小时） |
+| `fail_open` | `true` | 出错保留原片 |
 
 **按视频源开关**：在每个视频源（收藏夹 / 合集 / 投稿 / 稍后再看）的设置里打开或关闭「SponsorBlock」，对应数据库字段 `sponsorblock_enabled`；全局 `enabled` 关闭时所有视频源都不剪。
 
@@ -211,7 +226,8 @@ services:
 
 视频下载合并完成后，如果开启了 `sponsor_block.enabled`，会按下面的流程处理：
 
-1. **获取片段**：用 BV 号和 cid 请求 BilibiliSponsorBlock API `/api/skipSegments`，默认服务器是 `bsbsb.top`，失败时用镜像 `bsbsb.xyz`。只处理 `actionType = skip` 且类别在配置里的片段。
+1. **获取片段（B 站）**：用 BV 号和 cid 请求 BilibiliSponsorBlock API `/api/skipSegments`，默认服务器是 `bsbsb.top`，失败时用镜像 `bsbsb.xyz`。只处理 `actionType = skip` 且类别在配置里的片段。
+   - **YouTube**：下载完成后用 `sha256(videoID)` 前 4 位 hex 请求官方 `sponsor.ajay.app/api/skipSegments/{hash}?service=YouTube`，再按 videoID 过滤；失败可回退直查 `?videoID=`。配置键为 `sponsor_block_youtube`，不走 B 站服务器。
 2. **计算保留区间**：合并重叠的删除区间，取反得到要保留的区间；太短的片段（`min_segment_seconds`）和太短的保留间隙（`min_keep_gap_seconds`）会被忽略或并入删除区间。
 3. **ffmpeg 剪辑**，有两种模式：
    - `cut_mode = keyframe`（默认）：流复制，不重新编码，速度快、画质无损。每段保留区间的起点会**吸附到它之前最近的关键帧**，这与 ffmpeg 在 `-c copy` 下的实际行为一致。

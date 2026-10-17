@@ -690,6 +690,8 @@ pub struct ConfigResponse {
     pub ai_rename: AiRenameConfigResponse,
     // SponsorBlock 裁剪配置（本地扩展）
     pub sponsor_block: SponsorBlockConfigResponse,
+    /// YouTube SponsorBlock（官方 API，与 B 站分离）
+    pub sponsor_block_youtube: SponsorBlockConfigResponse,
     pub media_server: MediaServerConfigResponse,
     // 服务器绑定地址
     pub bind_address: String,
