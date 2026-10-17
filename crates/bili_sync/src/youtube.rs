@@ -2984,20 +2984,6 @@ async fn scan_source(db: &DatabaseConnection, source: &youtube_source::Model) ->
         );
         return Ok(0);
     }
-    if source.source_type == "tiktok_favorite" {
-        crate::tiktok::ensure_tiktok_session()?;
-        return crate::tiktok::scan_tiktok_favorite_source(db, source).await;
-    }
-    if source.source_type == "tiktok_collection" {
-        crate::tiktok::ensure_tiktok_session()?;
-        return crate::tiktok::scan_tiktok_collection_source(db, source).await;
-    }
-    if source.source_type == "tiktok" {
-        // TikTok 作者源走官方 API 直连扫描（api/creator/item_list/），不再依赖
-        // yt-dlp tiktok:user 平铺扫描——后者对部分作者会因无法解析 secondary
-        // user ID 而整轮失败。公开作者无需登录。
-        return crate::tiktok::scan_tiktok_user_source(db, source).await;
-    }
     // 稍后再看/我的喜欢/订阅 属于登录私有内容；未导入有效 YouTube 会话时直接
     // 给出明确提示并跳过扫描，避免每轮 yt-dlp 白跑并报出误导性的“播放列表不存在”。
     if is_youtube_private_source(source) && !youtube_has_session() {

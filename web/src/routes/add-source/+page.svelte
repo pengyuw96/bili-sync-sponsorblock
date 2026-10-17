@@ -105,7 +105,7 @@
 	};
 
 	let sourceType: VideoCategory = 'collection';
-	let sourcePlatform: 'bilibili' | 'youtube' | 'douyin' | 'tiktok' = 'bilibili';
+	let sourcePlatform: 'bilibili' | 'youtube' = 'bilibili';
 	let youtubeSourceType: YouTubeSourceType = 'subscriptions';
 	let youtubeUrl = '';
 	let youtubeStatus: YouTubeStatusResponse | null = null;

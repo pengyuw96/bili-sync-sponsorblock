@@ -73,9 +73,9 @@ import BookOpenIcon from '@lucide/svelte/icons/book-open';
 	let showDownloadsSheet = false;
 	type IngestView = 'latest' | 'recent';
 	let ingestView: IngestView = 'latest';
-	type IngestPlatform = 'all' | 'bilibili' | 'youtube' | 'douyin' | 'tiktok';
+	type IngestPlatform = 'all' | 'bilibili' | 'youtube';
 	let ingestPlatform: IngestPlatform = 'all';
-	type MonitoringPlatform = 'bilibili' | 'youtube' | 'douyin' | 'tiktok';
+	type MonitoringPlatform = 'bilibili' | 'youtube';
 	let monitoringPlatform: MonitoringPlatform = 'bilibili';
 	let unsubscribeSysInfo: (() => void) | null = null;
 	let unsubscribeTasks: (() => void) | null = null;
@@ -222,17 +222,13 @@ import BookOpenIcon from '@lucide/svelte/icons/book-open';
 	const INGEST_PLATFORM_LABEL: Record<IngestPlatform, string> = {
 		all: '全部',
 		bilibili: 'B站',
-		youtube: 'YouTube',
-		douyin: '抖音',
-		tiktok: 'TikTok'
+		youtube: 'YouTube'
 	};
 
 	const INGEST_PLATFORM_TABS: Array<{ value: IngestPlatform; label: string }> = [
 		{ value: 'all', label: '全部' },
 		{ value: 'bilibili', label: 'B站' },
-		{ value: 'youtube', label: 'YouTube' },
-		{ value: 'douyin', label: '抖音' },
-		{ value: 'tiktok', label: 'TikTok' }
+		{ value: 'youtube', label: 'YouTube' }
 	];
 
 	async function loadIngests(
@@ -434,14 +430,6 @@ import BookOpenIcon from '@lucide/svelte/icons/book-open';
 		youtube: {
 			label: 'YouTube',
 			color: 'var(--color-red-600)'
-		},
-		douyin: {
-			label: '抖音',
-			color: 'var(--color-purple-600)'
-		},
-		tiktok: {
-			label: 'TikTok',
-			color: 'var(--color-emerald-600)'
 		}
 	} satisfies Chart.ChartConfig;
 
@@ -450,16 +438,12 @@ import BookOpenIcon from '@lucide/svelte/icons/book-open';
 		day: string;
 		bilibili: number;
 		youtube: number;
-		douyin: number;
-		tiktok: number;
 	};
 	let dayMultiCounts: DayMultiCount[] = [];
 	$: if (dashboardData) {
 		const sources = [
 			dashboardData.videos_by_day,
-			dashboardData.youtube_videos_by_day ?? [],
-			dashboardData.douyin_videos_by_day ?? [],
-			dashboardData.tiktok_videos_by_day ?? []
+			dashboardData.youtube_videos_by_day ?? []
 		];
 		const dayCount = Math.max(...sources.map((list) => list.length), 0);
 		dayMultiCounts = [];
@@ -468,13 +452,9 @@ import BookOpenIcon from '@lucide/svelte/icons/book-open';
 				day:
 					dashboardData.videos_by_day[i]?.day ??
 					dashboardData.youtube_videos_by_day[i]?.day ??
-					dashboardData.douyin_videos_by_day[i]?.day ??
-					dashboardData.tiktok_videos_by_day[i]?.day ??
 					'',
 				bilibili: dashboardData.videos_by_day[i]?.cnt ?? 0,
-				youtube: dashboardData.youtube_videos_by_day?.[i]?.cnt ?? 0,
-				douyin: dashboardData.douyin_videos_by_day?.[i]?.cnt ?? 0,
-				tiktok: dashboardData.tiktok_videos_by_day?.[i]?.cnt ?? 0
+				youtube: dashboardData.youtube_videos_by_day?.[i]?.cnt ?? 0
 			});
 		}
 	}
@@ -554,7 +534,7 @@ import BookOpenIcon from '@lucide/svelte/icons/book-open';
 					<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
 						<CardTitle
 							class="text-sm font-medium"
-							title="显示当前监听的 B站、YouTube 和抖音视频源状态、下次扫描时间和监听统计"
+							title="显示当前监听的 B站与 YouTube 视频源状态、下次扫描时间和监听统计"
 						>
 							当前监听
 						</CardTitle>
@@ -620,11 +600,9 @@ import BookOpenIcon from '@lucide/svelte/icons/book-open';
 
 								<!-- 按平台切换具体监听项统计 -->
 								<Tabs.Root bind:value={monitoringPlatform}>
-									<Tabs.List class="grid w-full max-w-lg grid-cols-4">
+									<Tabs.List class="grid w-full max-w-md grid-cols-2">
 										<Tabs.Trigger value="bilibili">B 站视频源</Tabs.Trigger>
 										<Tabs.Trigger value="youtube">YouTube 视频源</Tabs.Trigger>
-										<Tabs.Trigger value="douyin">抖音视频源</Tabs.Trigger>
-										<Tabs.Trigger value="tiktok">TikTok 视频源</Tabs.Trigger>
 									</Tabs.List>
 
 									{#if monitoringPlatform === 'bilibili'}
@@ -745,83 +723,6 @@ import BookOpenIcon from '@lucide/svelte/icons/book-open';
 												</div>
 											</div>
 										</div>
-									{:else if monitoringPlatform === 'douyin'}
-										<div class="mt-4 grid grid-cols-2 gap-4 lg:grid-cols-3">
-											<div class="flex items-center justify-between">
-												<div class="flex items-center gap-2">
-													<UserIcon class="text-muted-foreground h-4 w-4" />
-													<span class="text-sm">作者投稿</span>
-												</div>
-												<Badge variant="outline">
-													{dashboardData.enabled_douyin_authors} / {dashboardData.total_douyin_authors}
-												</Badge>
-											</div>
-											<div class="flex items-center justify-between">
-												<div class="flex items-center gap-2">
-													<HeartIcon class="text-muted-foreground h-4 w-4" />
-													<span class="text-sm">我的喜欢</span>
-												</div>
-												<Badge variant="outline">{dashboardData.enabled_douyin_liked} / {dashboardData.total_douyin_liked}</Badge>
-											</div>
-											<div class="flex items-center justify-between">
-												<div class="flex items-center gap-2">
-													<FolderIcon class="text-muted-foreground h-4 w-4" />
-													<span class="text-sm">收藏夹</span>
-												</div>
-												<Badge variant="outline">{dashboardData.enabled_douyin_collections} / {dashboardData.total_douyin_collections}</Badge>
-											</div>
-											<div class="flex items-center justify-between">
-												<div class="flex items-center gap-2">
-													<ClockIcon class="text-muted-foreground h-4 w-4" />
-													<span class="text-sm">稍后再看</span>
-												</div>
-												<Badge variant="outline">{dashboardData.enabled_douyin_watch_later} / {dashboardData.total_douyin_watch_later}</Badge>
-											</div>
-											<div class="flex items-center justify-between">
-												<div class="flex items-center gap-2">
-													<TvIcon class="text-muted-foreground h-4 w-4" />
-													<span class="text-sm">放映厅</span>
-												</div>
-												<Badge variant="outline">{dashboardData.enabled_douyin_theaters} / {dashboardData.total_douyin_theaters}</Badge>
-											</div>
-											<div class="flex items-center justify-between">
-												<div class="flex items-center gap-2">
-													<ListVideoIcon class="text-muted-foreground h-4 w-4" />
-													<span class="text-sm">短剧</span>
-												</div>
-												<Badge variant="outline">{dashboardData.enabled_douyin_series} / {dashboardData.total_douyin_series}</Badge>
-											</div>
-										</div>
-									{:else}
-										<div class="mt-4 grid grid-cols-2 gap-4 lg:grid-cols-3">
-											<div class="flex items-center justify-between">
-												<div class="flex items-center gap-2">
-													<UserIcon class="text-muted-foreground h-4 w-4" />
-													<span class="text-sm">作者投稿</span>
-												</div>
-												<Badge variant="outline">
-													{dashboardData.enabled_tiktok_authors} / {dashboardData.total_tiktok_authors}
-												</Badge>
-											</div>
-											<div class="flex items-center justify-between">
-												<div class="flex items-center gap-2">
-													<HeartIcon class="text-muted-foreground h-4 w-4" />
-													<span class="text-sm">我的喜欢</span>
-												</div>
-												<Badge variant="outline">
-													{dashboardData.enabled_tiktok_liked} / {dashboardData.total_tiktok_liked}
-												</Badge>
-											</div>
-											<div class="flex items-center justify-between">
-												<div class="flex items-center gap-2">
-													<FolderIcon class="text-muted-foreground h-4 w-4" />
-													<span class="text-sm">收藏夹</span>
-												</div>
-												<Badge variant="outline">
-													{dashboardData.enabled_tiktok_collections} / {dashboardData.total_tiktok_collections}
-												</Badge>
-											</div>
-										</div>
 {/if}
 								</Tabs.Root>
 							</div>
@@ -848,14 +749,14 @@ import BookOpenIcon from '@lucide/svelte/icons/book-open';
 									<span>近七日新增视频</span>
 									<span class="font-medium">
 										{dayMultiCounts.reduce(
-											(sum, v) => sum + v.bilibili + v.youtube + v.douyin + v.tiktok,
+											(sum, v) => sum + v.bilibili + v.youtube,
 											0
 										)}{' '}
 										个
 									</span>
 								</div>
 								<div class="flex flex-wrap gap-3 text-xs">
-									{#each ['bilibili', 'youtube', 'douyin', 'tiktok'] as key (key)}
+									{#each ['bilibili', 'youtube'] as key (key)}
 										<span class="flex items-center gap-1">
 											<span
 												class="inline-block h-2 w-2 rounded-sm"
@@ -874,27 +775,17 @@ import BookOpenIcon from '@lucide/svelte/icons/book-open';
 									x="day"
 									axis="x"
 									series={[
-										{
-											key: 'bilibili',
-											label: 'B站',
-											color: videoChartConfig.bilibili.color
-										},
-										{
-											key: 'youtube',
-											label: 'YouTube',
-											color: videoChartConfig.youtube.color
-										},
-										{
-											key: 'douyin',
-											label: '抖音',
-											color: videoChartConfig.douyin.color
-										},
-										{
-											key: 'tiktok',
-											label: 'TikTok',
-											color: videoChartConfig.tiktok.color
-										}
-									]}
+											{
+												key: 'bilibili',
+												label: 'B站',
+												color: videoChartConfig.bilibili.color
+											},
+											{
+												key: 'youtube',
+												label: 'YouTube',
+												color: videoChartConfig.youtube.color
+											}
+										]}
 									props={{
 										bars: {
 											stroke: 'none',

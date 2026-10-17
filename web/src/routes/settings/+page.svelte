@@ -49,8 +49,6 @@
 	import ThemeToggle from '$lib/components/theme-toggle.svelte';
 	import Loading from '$lib/components/ui/Loading.svelte';
 	import YouTubeLoginPanel from '$lib/components/youtube-login-panel.svelte';
-	import DouyinLoginPanel from '$lib/components/douyin-login-panel.svelte';
-	import TikTokLoginPanel from '$lib/components/tiktok-login-panel.svelte';
 
 	let config: ConfigResponse | null = null;
 	let loading = false;
@@ -186,8 +184,6 @@
 		credential: '填写 B 站登录凭证，影响会员画质、互动内容和受限接口访问。',
 		youtube_login: '通过电脑端登录助手或 cookies.txt 管理 yt-dlp 使用的 YouTube 登录状态。',
 		network_proxy: '外源网络代理：YouTube 的搜索、扫描、直链解析和下载使用；B站不受影响。',
-		douyin_login: '通过同一个电脑端登录助手或 cookies.txt 管理抖音作者作品扫描和下载所需的 Cookie。',
-		tiktok_login: '管理 TikTok 作者扫描所用的 cookies.txt；TikTok 公开作者主页无需登录即可同步，导入后 yt-dlp 可访问需要登录的私密/受限内容。',
 		risk: '调整投稿源扫描时的风控规避策略、批量设置和延迟参数。',
 		captcha: '设置遇到验证码风控时的处理模式、超时和自动识别参数。',
 		aria2: '配置外部 Aria2 的健康检查、自动重启和监控策略。',
@@ -628,8 +624,8 @@
 	// 变量说明
 	const variableHelp = {
 		video: [
-			{ name: '{{title}}', desc: '视频标题（抖音/TikTok/YouTube 会自动去掉话题标签、只保留第一行）' },
-			{ name: '{{title_full}}', desc: '完整原标题（仅抖音/TikTok/YouTube 可用，不做清洗）' },
+			{ name: '{{title}}', desc: '视频标题（YouTube 会自动去掉话题标签、只保留第一行）' },
+			{ name: '{{title_full}}', desc: '完整原标题（仅 YouTube 可用，不做清洗）' },
 			{ name: '{{show_title}}', desc: '节目标题（与title相同）' },
 			{ name: '{{bvid}}', desc: 'BV号（视频编号）' },
 			{ name: '{{upper_name}}', desc: 'UP主名称' },
@@ -639,8 +635,8 @@
 			{ name: '{{ctime}}', desc: '视频创建时间' }
 		],
 		page: [
-			{ name: '{{title}}', desc: '视频标题（单P/多P模板可用；抖音/TikTok/YouTube 会自动去掉话题标签、只保留第一行）' },
-			{ name: '{{title_full}}', desc: '完整原标题（仅抖音/TikTok/YouTube 可用，不做清洗）' },
+			{ name: '{{title}}', desc: '视频标题（单P/多P模板可用；YouTube 会自动去掉话题标签、只保留第一行）' },
+			{ name: '{{title_full}}', desc: '完整原标题（仅 YouTube 可用，不做清洗）' },
 			{ name: '{{bvid}}', desc: 'BV号（视频编号，单P/多P模板可用）' },
 			{ name: '{{upper_name}}', desc: 'UP主名称（单P/多P模板可用）' },
 			{ name: '{{upper_mid}}', desc: 'UP主ID（单P/多P模板可用）' },
@@ -3647,7 +3643,7 @@
 				autocomplete="off"
 			/>
 			<p class="text-muted-foreground text-sm">
-				YouTube 与 TikTok 的搜索、订阅、扫描、直链解析、视频/音频/封面/头像/字幕和直播聊天共用此代理；B站与抖音不会使用。留空关闭。
+				YouTube 的搜索、订阅、扫描、直链解析、视频/音频/封面/头像/字幕和直播聊天使用此代理；B 站不会使用。留空关闭。
 			</p>
 			<div class="flex flex-wrap items-center gap-2 pt-1">
 				<Button type="button" size="sm" variant="outline" disabled={proxyTesting} onclick={handleTestProxy}>
@@ -3681,44 +3677,7 @@
 	</SheetFooter>
 </ResponsiveSheet>
 
-<!-- 抖音登录状态设置抽屉 -->
-<ResponsiveSheet
-	open={openSheet === 'douyin_login'}
-	onOpenChange={(open) => {
-		if (!open) openSheet = null;
-	}}
-	title="抖音登录状态"
-	description="从电脑端登录助手或 cookies.txt 导入抖音 Cookie"
-	titleTooltip={getSettingTooltip('douyin_login')}
-	{isMobile}
->
-	<div class="min-h-0 flex-1 overflow-y-auto {isMobile ? 'px-4 py-4' : 'px-6 py-6'}">
-		<DouyinLoginPanel />
-		<div class="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800 dark:border-blue-800 dark:bg-blue-950/20 dark:text-blue-200">
-			导入后可搜索抖音作者、选择历史作品并持续扫描新作品。媒体仍使用项目现有统一下载器、画质设置、路径模板、封面与 NFO 链路。
-		</div>
-	</div>
-</ResponsiveSheet>
 
-<!-- TikTok 登录状态设置抽屉 -->
-<ResponsiveSheet
-	open={openSheet === 'tiktok_login'}
-	onOpenChange={(open) => {
-		if (!open) openSheet = null;
-	}}
-	title="TikTok 登录状态"
-	description="从电脑浏览器导出的 cookies.txt 导入 TikTok 登录状态"
-	titleTooltip={getSettingTooltip('tiktok_login')}
-	{isMobile}
->
-	<div class="min-h-0 flex-1 overflow-y-auto {isMobile ? 'px-4 py-4' : 'px-6 py-6'}">
-		<TikTokLoginPanel />
-		<div class="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800 dark:border-blue-800 dark:bg-blue-950/20 dark:text-blue-200">
-			TikTok 作者主页公开内容无需登录即可同步；导入登录状态后，作者扫描会携带该 Cookie，可访问需要登录才可见的私密/受限内容，且不会与 YouTube、抖音的 Cookie 混用。
-		</div>
-
-	</div>
-</ResponsiveSheet>
 
 <!-- 风控配置抽屉 -->
 <ResponsiveSheet

@@ -142,64 +142,6 @@
 			icon: HistoryIcon
 		}
 	} as const;
-	const TIKTOK_SOURCE_SECTIONS = {
-		TIKTOK_AUTHOR: {
-			type: 'tiktok',
-			youtubeSourceType: 'tiktok',
-			title: 'TikTok 作者',
-			icon: UserIcon
-		},
-		TIKTOK_FAVORITE: {
-			type: 'tiktok',
-			youtubeSourceType: 'tiktok_favorite',
-			title: '我的喜欢',
-			icon: HeartIcon
-		},
-		TIKTOK_COLLECTION: {
-			type: 'tiktok',
-			youtubeSourceType: 'tiktok_collection',
-			title: '收藏夹',
-			icon: ListTreeIcon
-		}
-	} as const;
-	const DOUYIN_SOURCE_SECTIONS = {
-		DOUYIN_AUTHOR: {
-			type: 'douyin',
-			youtubeSourceType: 'douyin',
-			title: '作者投稿',
-			icon: UserIcon
-		},
-		DOUYIN_LIKED: {
-			type: 'douyin',
-			youtubeSourceType: 'douyin_liked',
-			title: '我的喜欢',
-			icon: HeartIcon
-		},
-		DOUYIN_COLLECTION: {
-			type: 'douyin',
-			youtubeSourceType: 'douyin_collection',
-			title: '收藏夹',
-			icon: ListTreeIcon
-		},
-		DOUYIN_WATCH_LATER: {
-			type: 'douyin',
-			youtubeSourceType: 'douyin_watch_later',
-			title: '稍后再看',
-			icon: HistoryIcon
-		},
-		DOUYIN_THEATER: {
-			type: 'douyin',
-			youtubeSourceType: 'douyin_theater',
-			title: '放映厅',
-			icon: ListVideoIcon
-		},
-		DOUYIN_SERIES: {
-			type: 'douyin',
-			youtubeSourceType: 'douyin_series',
-			title: '短剧',
-			icon: ListTreeIcon
-		}
-	} as const;
 
 	let loading = false;
 	let platformTab: 'youtube' | 'bilibili' = 'bilibili';
@@ -383,18 +325,16 @@
 
 	async function loadVideoSources(silent = false) {
 		const response = await runRequest(async () => {
-			const [bilibili, youtube, douyin, tiktok] = await Promise.all([
+			const [bilibili, youtube] = await Promise.all([
 				api.getVideoSources(),
-				api.getYouTubeSources(),
-				api.getDouyinSources(),
-				api.getTikTokSources()
+				api.getYouTubeSources()
 			]);
 			return {
 				data: {
 					...bilibili.data,
 					youtube: youtube.data.map(youtubeSourceToVideoSource),
-					douyin: douyin.data.map(youtubeSourceToVideoSource),
-					tiktok: tiktok.data.map(youtubeSourceToVideoSource)
+					douyin: [],
+					tiktok: []
 				} satisfies VideoSourcesResponse
 			};
 		}, {
@@ -2299,7 +2239,7 @@
 													disabled={source.download_subtitle === false ||
 														(!isExternalSourceType(sourceConfig.type) && source.download_ai_subtitle === false)}
 											title={isExternalSourceType(sourceConfig.type)
-												? `${sourceConfig.type === 'douyin' ? '抖音' : 'YouTube'} 字幕优先语言，缺失时按来源语言回退`
+												? `YouTube 字幕优先语言，缺失时按来源语言回退`
 														: 'AI 字幕优先语言，目标语言缺失时回退中文'}
 													class="h-8 w-[76px] rounded-md border border-gray-200 bg-white px-1 text-xs text-gray-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
 													size="sm"
