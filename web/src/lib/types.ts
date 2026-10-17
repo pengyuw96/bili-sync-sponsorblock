@@ -773,6 +773,7 @@ export interface SponsorBlockConfig {
 	last_ok?: boolean;
 	checked_at?: string;
 	heartbeat_interval_secs?: number;
+	download_delay_hours?: number;
 }
 
 export interface SponsorBlockServerHealth {

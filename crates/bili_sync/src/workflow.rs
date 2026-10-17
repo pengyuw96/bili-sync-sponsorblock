@@ -2874,6 +2874,63 @@ async fn cleanup_completed_skipped_video_sidecars(
 }
 
 /// 下载所有未处理成功的视频
+async fn mark_charge_video_skipped_without_files(
+    connection: &DatabaseConnection,
+    video_model: &video::Model,
+) -> Result<()> {
+    use sea_orm::sea_query::Expr;
+    use sea_orm::{Set, Unchanged};
+    let ok_video_status: u32 = VideoStatus::from([STATUS_OK; 5]).into();
+    let ok_page_status: u32 = PageStatus::from([STATUS_OK; 6]).into();
+    let txn = crate::database::begin_traced_transaction(connection, "workflow.mark_charge_video_skipped").await?;
+    video::Entity::update(video::ActiveModel {
+        id: Unchanged(video_model.id),
+        download_status: Set(ok_video_status),
+        ..Default::default()
+    })
+    .exec(&txn)
+    .await?;
+    page::Entity::update_many()
+        .col_expr(page::Column::DownloadStatus, Expr::value(ok_page_status))
+        .filter(page::Column::VideoId.eq(video_model.id))
+        .exec(&txn)
+        .await?;
+    txn.commit().await?;
+    Ok(())
+}
+
+/// 是否处于 SponsorBlock 延迟下载窗口内：仅针对从未开始下载（download_status == 0）的新视频。
+pub(crate) fn is_within_sponsor_block_download_delay(
+    download_status: u32,
+    pubtime: chrono::NaiveDateTime,
+    now: chrono::NaiveDateTime,
+    delay_hours: u64,
+) -> bool {
+    if delay_hours == 0 || download_status != 0 {
+        return false;
+    }
+    let delay = chrono::Duration::hours(delay_hours.min(1_000_000) as i64);
+    now.signed_duration_since(pubtime) < delay
+}
+
+#[cfg(test)]
+mod sponsor_block_download_delay_tests {
+    use super::is_within_sponsor_block_download_delay as f;
+    use chrono::{Duration, NaiveDate};
+
+    #[test]
+    fn delay_window() {
+        let now = NaiveDate::from_ymd_opt(2026, 10, 17).unwrap().and_hms_opt(12, 0, 0).unwrap();
+        assert!(f(0, now - Duration::hours(1), now, 72));
+        assert!(f(0, now - Duration::hours(71), now, 72));
+        assert!(!f(0, now - Duration::hours(72), now, 72));
+        assert!(!f(0, now - Duration::days(30), now, 72));
+        assert!(!f(0, now - Duration::hours(1), now, 0));
+        assert!(!f(1, now - Duration::hours(1), now, 72));
+        assert!(!f(0, chrono::NaiveDateTime::default(), now, 72));
+    }
+}
+
 pub async fn download_unprocessed_videos(
     bili_client: &BiliClient,
     video_source: &VideoSourceEnum,
@@ -2901,6 +2958,53 @@ pub async fn download_unprocessed_videos(
         })?;
     let effective_filter_option = source_filter_option.unwrap_or_else(|| current_config.filter_option.clone());
     let mut unhandled_videos_pages = filter_unhandled_video_pages(video_source.filter_expr(), connection).await?;
+    // 关闭充电视频下载时：充电专享视频不建目录、不写任何文件（NFO/封面/弹幕/字幕/占位），
+    // 只在数据库里标记为已完成，避免每轮重试；Emby 不会看到只有元数据的空壳目录。
+    if !video_source.download_charge_videos() {
+        let (charge, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut unhandled_videos_pages)
+            .into_iter()
+            .partition(|(video_model, _)| video_model.is_charge_video);
+        unhandled_videos_pages = rest;
+        for (video_model, _) in charge {
+            mark_charge_video_skipped_without_files(connection, &video_model).await?;
+            info!(
+                "「{}」({}) 为充电专享视频，视频源未开启充电视频下载，跳过（不创建目录和文件）",
+                video_model.name, video_model.bvid
+            );
+        }
+    }
+    if current_config.sponsor_block.enabled && current_config.sponsor_block.download_delay_hours > 0 {
+        let now = chrono::Utc::now()
+            .with_timezone(&crate::utils::time_format::beijing_timezone())
+            .naive_local();
+        let delay_hours = current_config.sponsor_block.download_delay_hours;
+        let before = unhandled_videos_pages.len();
+        unhandled_videos_pages.retain(|(video_model, _)| {
+            let keep = !is_within_sponsor_block_download_delay(
+                video_model.download_status,
+                video_model.pubtime,
+                now,
+                delay_hours,
+            );
+            if !keep {
+                debug!(
+                    "SponsorBlock 延迟下载：「{}」({}) 发布于 {}，未满 {} 小时，本轮跳过",
+                    video_model.name, video_model.bvid, video_model.pubtime, delay_hours
+                );
+            }
+            keep
+        });
+        let deferred = before - unhandled_videos_pages.len();
+        if deferred > 0 {
+            info!(
+                "{}「{}」有 {} 个新视频发布未满 {} 小时，延迟下载（等待 SponsorBlock 片段），后续扫描再处理",
+                video_source.source_type_display(),
+                video_source.source_name_display(),
+                deferred,
+                delay_hours
+            );
+        }
+    }
     let original_unhandled_video_count = unhandled_videos_pages.len();
     let original_unhandled_page_count = unhandled_videos_pages
         .iter()

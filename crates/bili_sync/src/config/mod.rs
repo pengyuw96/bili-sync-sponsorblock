@@ -607,6 +607,10 @@ pub struct SponsorBlockConfig {
     /// Initial probe still runs on startup when enabled.
     #[serde(default = "default_sponsor_block_heartbeat_interval")]
     pub heartbeat_interval_secs: u64,
+    /// 新视频发布后延迟下载（小时），给 SponsorBlock 留出提交片段的时间。默认 72；0 = 关闭。
+    /// 仅在 SponsorBlock 启用时生效；未到时间的视频本轮跳过，后续扫描再下载。
+    #[serde(default = "default_sponsor_block_download_delay_hours")]
+    pub download_delay_hours: u64,
 }
 
 fn default_sponsor_block_enabled() -> bool {
@@ -661,6 +665,10 @@ fn default_sponsor_block_heartbeat_interval() -> u64 {
     300
 }
 
+fn default_sponsor_block_download_delay_hours() -> u64 {
+    72
+}
+
 impl Default for SponsorBlockConfig {
     fn default() -> Self {
         Self {
@@ -677,6 +685,7 @@ impl Default for SponsorBlockConfig {
             api_timeout_ms: default_sponsor_block_api_timeout(),
             fail_open: default_sponsor_block_fail_open(),
             heartbeat_interval_secs: default_sponsor_block_heartbeat_interval(),
+            download_delay_hours: default_sponsor_block_download_delay_hours(),
         }
     }
 }

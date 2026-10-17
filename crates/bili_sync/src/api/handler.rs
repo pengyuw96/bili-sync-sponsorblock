@@ -11400,6 +11400,7 @@ pub async fn get_config() -> Result<ApiResponse<crate::api::response::ConfigResp
                 last_ok: summary.as_ref().map(|s| s.last_ok),
                 checked_at: summary.as_ref().map(|s| s.checked_at.clone()),
                 heartbeat_interval_secs: config.sponsor_block.heartbeat_interval_secs,
+                download_delay_hours: config.sponsor_block.download_delay_hours,
             }
         },
         media_server: crate::api::response::MediaServerConfigResponse {

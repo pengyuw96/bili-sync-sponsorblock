@@ -1366,6 +1366,7 @@ pub struct SponsorBlockConfigResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub checked_at: Option<String>,
     pub heartbeat_interval_secs: u64,
+    pub download_delay_hours: u64,
 }
 
 // Emby/Jellyfin 扫描通知配置响应（API 密钥只返回是否已设置）
