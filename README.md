@@ -10,10 +10,12 @@
 [![Docker](https://img.shields.io/badge/docker-self--build-2496ED?logo=docker&logoColor=white)](#-快速开始)
 [![Platform](https://img.shields.io/badge/platform-linux%2Famd64-lightgrey)](#-硬件与兼容性)
 [![iGPU](https://img.shields.io/badge/iGPU-VAAPI%20%7C%20QSV-0071C5?logo=intel&logoColor=white)](#-智能裁剪原理beta)
+[![YouTube SB](https://img.shields.io/badge/YouTube-SponsorBlock-FF0000?logo=youtube&logoColor=white)](#-功能亮点)
+[![Bilibili SB](https://img.shields.io/badge/Bilibili-SponsorBlock-00A1D6?logo=bilibili&logoColor=white)](#-功能亮点)
 
 </div>
 
-基于 [NeeYoonc/bili-sync-up](https://github.com/NeeYoonc/bili-sync-up)（上游 [amtoaer/bili-sync](https://github.com/amtoaer/bili-sync)）的社区 fork：在下载完成后按 [BilibiliSponsorBlock](https://github.com/hanydd/BilibiliSponsorBlock) 数据自动剪掉恰饭片段，并提供只重编码切点附近几秒、可调用 Intel 核显的 **智能精确裁剪（BETA）**。
+基于 [NeeYoonc/bili-sync-up](https://github.com/NeeYoonc/bili-sync-up)（上游 [amtoaer/bili-sync](https://github.com/amtoaer/bili-sync)）的社区 fork：同时维护 **B 站** 与 **YouTube**。下载完成后分别按 [BilibiliSponsorBlock](https://github.com/hanydd/BilibiliSponsorBlock) / 官方 [SponsorBlock](https://sponsor.ajay.app) 数据自动剪掉恰饭片段，并提供只重编码切点附近几秒、可调用 Intel 核显的 **智能精确裁剪（BETA）**。抖音 / TikTok 产品入口已停用。
 
 > 当前版本 **v3.1.5.1**（Cargo 包版本 `3.1.5`，Cargo 不支持四段版本号），上游基线 bili-sync-up **v3.1.5**。非官方版本，问题请勿反馈到上游。本仓库不发布 Release / 镜像，需要自行编译。
 
@@ -33,19 +35,29 @@
 
 ## ✨ 功能亮点
 
-- ✂️ **SponsorBlock 自动剪辑（B 站）**：下载合并后拉取 BilibiliSponsorBlock 片段，剪掉恰饭 / 垫片等类别，原子替换原文件；默认发布满 72 小时再下载。
-- ▶️ **YouTube SponsorBlock**：下载完成后查询官方 `sponsor.ajay.app`（隐私 hash 前缀，与 B 站 `bsbsb.top` 完全分离）；默认硬剪 `sponsor` + `selfpromo`，`intro` / `outro` / `filler` 仅章节标记；默认发布满 24 小时再下载；裁剪复用现有智能裁剪管线。
-- 🚫 **仅维护 B 站 + YouTube**：抖音 / TikTok 入口与扫描已停用（已下载文件保留，数据库迁移保留）。
+### SponsorBlock 与平台
+
+- ✂️ **SponsorBlock 自动剪辑（B 站）**：下载合并后拉取 BilibiliSponsorBlock 片段，剪掉恰饭 / 垫片等类别，原子替换原文件；**默认发布满 72 小时再下载**，给社区提交片段留时间（可配置，`0` 关闭）。
+- ▶️ **YouTube SponsorBlock（官方 API）**：下载完成后查询官方 `sponsor.ajay.app`（隐私 hash 前缀，与 B 站 `bsbsb.top` **完全分离**）；默认硬剪 `sponsor` + `selfpromo`，`intro` / `outro` / `filler` **仅章节标记**；**默认发布满 24 小时再下载**；裁剪复用现有智能裁剪 / 核显管线。
+- 🚫 **仅维护 B 站 + YouTube**：抖音 / TikTok 登录页、视频源标签与扫描入口已从产品界面移除（已下载文件与数据库迁移保留，不再更新）。
 - 🎛️ **按视频源单独开关**：每个收藏夹、合集、UP 主投稿、稍后再看都可以单独启用或关闭剪辑，新建视频源时即可设置。
+- 💳 **充电视频（B 站）**：视频源关闭「下载充电视频」时，充电专享内容**不建文件夹、不写 NFO / 封面 / 字幕 / 弹幕 / 占位文件**，只在数据库标记已处理，避免 Emby 扫到空壳；开启下载时逻辑与原先一致。
+
+### 画质与编码
+
+- 🎚️ **B 站 / YouTube 画质分开设置**：Web 设置页分别有「视频质量（B站）」与「视频质量（YouTube）」；油管用自身分辨率（4320…360）与编码名 **HEVC / AV1 / VP9 / AVC**，**默认编码优先级 HEVC → AV1 → VP9 → AVC**。
+- 🎞️ **智能裁剪以 H.265 为主**：针对 B 站 HEVC 片源与油管 HEVC 流优化，也支持 H.264；open-GOP 关键帧（H.264 非 IDR / HEVC CRA）不会被当作流复制起点，出错自动回退。
+
+### 智能裁剪与运维
+
 - 🔑 **关键帧裁剪（stable，默认）**：纯流复制，不重新编码，画质无损、速度快，切点吸附到关键帧。
 - 🎯 **智能精确裁剪（BETA）**：只重编码每个切点到相邻关键帧之间的几秒，其余部分流复制，切点精确到帧。
 - ⚡ **核显硬件编码**：编码器按 `hevc_vaapi` → `hevc_qsv` → `libx265` 依次尝试，全部失败则自动回退 stable。
-- 🎞️ **以 H.265 为主**：针对 B 站 HEVC 片源优化，也支持 H.264；open-GOP 关键帧（H.264 非 IDR / HEVC CRA）不会被当作流复制起点，出错自动回退。
 - 🐢 **低 CPU 占用**：`nice 10`、`-threads 2`、同一时间只剪一个视频，不拖慢 NAS。
 - 📝 **时间轴全对齐**：字幕、弹幕、章节与视频使用同一组实际删除区间；剪后用 ffprobe 实测时长修正章节、NFO `<runtime>` 和数据库时长。
 - 👤 **非 root 运行**：入口脚本只用 root 给容器内的 `/dev/dri` 设备授权（宿主机设备权限不变），然后以 `PUID:PGID` 运行，下载的文件直接属于对应用户和用户组。
 - 🗑️ **彻底删除视频**：网页删除视频时，连同该视频的整个文件夹（视频、NFO、图片、字幕、弹幕、SponsorBlock 计划等）一起删除，再向上清理变空的父目录，止于视频源根目录；路径不在视频源根目录内、或目录里还有其它视频时拒绝删除。
-- ☑️ **批量选择「全选本页」**：视频列表批量模式下一键全选 / 取消当前页视频。
+- ☑️ **批量选择**：视频列表支持「全选本页」与「全选全部」（跨页、尊重当前筛选），顺序批量删除并显示进度；切换筛选时会清空过期的跨页选中。
 - 📁 **同名文件夹直接复用**：目标文件夹已存在时直接复用并覆盖，不再生成「-发布时间-BV号」后缀的重复目录。
 - 📺 **Emby / Jellyfin 适配**：统一单 P 文件名、下载整轮结束后定向通知扫库、路径映射。
 
@@ -202,6 +214,16 @@ services:
 | `download_delay_hours` | `24` | 新视频延迟下载（小时） |
 | `fail_open` | `true` | 出错保留原片 |
 
+`youtube_filter_option` 配置段（Web 设置页「视频质量（YouTube）」，与 B 站 `filter_option` 分离）：
+
+| 字段 | 默认值 | 说明 |
+|---|---|---|
+| `video_max_height` | `4320` | 最高分辨率短边像素（4320 / 2160 / 1440 / 1080 / 720 / 480 / 360） |
+| `video_min_height` | `360` | 最低分辨率短边像素 |
+| `codecs` | `["HEVC","AV1","VP9","AVC"]` | 编码优先级（靠前优先），默认 HEVC 优先 |
+| `audio_max_bitrate` / `audio_min_bitrate` | 不限制 / `0` | 音频码率上下限（kbps） |
+| `no_dolby_video` / `no_dolby_audio` / `no_hdr` / `no_hires` | `false` | 排除对应流 |
+
 **按视频源开关**：在每个视频源（收藏夹 / 合集 / 投稿 / 稍后再看）的设置里打开或关闭「SponsorBlock」，对应数据库字段 `sponsorblock_enabled`；全局 `enabled` 关闭时所有视频源都不剪。
 
 环境变量：
@@ -218,7 +240,22 @@ services:
   "mark_categories": [],
   "cut_mode": "keyframe",
   "cut_strategy": "beta_smart",
+  "download_delay_hours": 72,
   "fail_open": true
+},
+"sponsor_block_youtube": {
+  "enabled": true,
+  "server_address": "https://sponsor.ajay.app",
+  "categories": ["sponsor", "selfpromo"],
+  "mark_categories": ["intro", "outro", "filler"],
+  "cut_strategy": "beta_smart",
+  "download_delay_hours": 24,
+  "fail_open": true
+},
+"youtube_filter_option": {
+  "video_max_height": 2160,
+  "video_min_height": 360,
+  "codecs": ["HEVC", "AV1", "VP9", "AVC"]
 }
 ```
 
@@ -284,9 +321,24 @@ stable 模式切点吸附到关键帧，B 站 GOP 一般 1 到数秒，可能多
 检查路径映射：把容器内的 `/bili-sync/...` 映射成媒体服务器看到的路径；通知在一整轮下载结束后再等 `delay_seconds`（默认 300 秒）才发送。
 </details>
 
+<details>
+<summary><b>新视频为什么迟迟不下载？</b></summary>
+
+B 站默认 `sponsor_block.download_delay_hours = 72`，YouTube 默认 `sponsor_block_youtube.download_delay_hours = 24`：发布未满该小时数会先跳过，下一轮扫描再判断，不会标成失败。设为 `0` 可立即下载。
+</details>
+
+<details>
+<summary><b>关闭充电视频下载后，Emby 里还有空壳条目？</b></summary>
+
+新逻辑下关闭「下载充电视频」时不会再创建文件夹或元数据。若库里仍有旧空壳，请在 Emby 中删除对应条目，并清理磁盘上只含 NFO / 封面的目录。
+</details>
+
 ## 🔀 与上游的区别
 
-- 新增 SponsorBlock 剪辑（stable / beta_smart / accurate）、按视频源开关、章节标记、字幕弹幕时间轴对齐。
+- 新增 B 站 SponsorBlock 剪辑（stable / beta_smart / accurate）、按视频源开关、章节标记、字幕弹幕时间轴对齐；新视频默认延迟 72 小时再下载。
+- 新增 YouTube 官方 SponsorBlock（`sponsor.ajay.app`，配置与 B 站分离）、独立油管画质 / 编码设置（默认 HEVC 优先）。
+- 产品界面仅保留 B 站 + YouTube；抖音 / TikTok 入口停用。
+- 关闭「下载充电视频」时不创建任何元数据目录 / 文件，避免污染 Emby 库。
 - 新增 Emby / Jellyfin 适配：统一单 P 文件名、整轮结束后定向通知扫库、路径映射。
 - 镜像加入 Intel VAAPI / QSV 运行库和非 root 入口脚本。
 - 视频处理并发默认 1（限制 1～2），避免 NAS 上 ffmpeg 抢资源。
@@ -306,7 +358,9 @@ stable 模式切点吸附到关键帧，B 站 GOP 一般 1 到数秒，可能多
 
 - [amtoaer/bili-sync](https://github.com/amtoaer/bili-sync)：原始项目
 - [NeeYoonc/bili-sync-up](https://github.com/NeeYoonc/bili-sync-up)：本 fork 的直接上游
-- [hanydd/BilibiliSponsorBlock](https://github.com/hanydd/BilibiliSponsorBlock)：片段数据、API，以及浏览器插件中精确剪切思路的参考
+- [hanydd/BilibiliSponsorBlock](https://github.com/hanydd/BilibiliSponsorBlock)：B 站片段数据、API，以及浏览器插件中精确剪切思路的参考
+- [SponsorBlock](https://sponsor.ajay.app) / [ajayyy/SponsorBlock](https://github.com/ajayyy/SponsorBlock)：YouTube 官方赞助片段 API
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp)：YouTube 下载
 - [MoviePilot](https://github.com/jxxghp/MoviePilot)、[Sonarr](https://github.com/Sonarr/Sonarr)：媒体服务器通知的参考实现
 
 以 [MIT](./License) 许可证发布。
